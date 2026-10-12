@@ -3,7 +3,7 @@ import { EditorPane, type EditorHandle, type Side, type SideState } from './comp
 import { Library } from './components/Library';
 import { DiffView } from './lib/diffView';
 import { monaco } from './lib/monaco';
-import { diffInWorker, formatInWorker, validateInWorker } from './lib/workers';
+import { diffInWorker, formatInWorker, resetDiffWorker, validateInWorker } from './lib/workers';
 import { loadSettings, saveSettings, storage, type DocMeta, type Settings } from './lib/storage';
 import type { JsonError } from './lib/protocol';
 import { SAMPLE_LEFT, SAMPLE_RIGHT } from './sample';
@@ -173,7 +173,10 @@ export function App() {
         const vl = l.model.getVersionId();
         const vr = r.model.getVersionId();
         const t0 = performance.now();
-        const result = await diffInWorker(l.model.getValue(), r.model.getValue());
+        const result = await diffInWorker(
+          { key: vl, getText: () => l.model.getValue() },
+          { key: vr, getText: () => r.model.getValue() },
+        );
         const unchanged = l.model.getVersionId() === vl && r.model.getVersionId() === vr;
         if (unchanged && settingsRef.current.compare) {
           view.apply(result);
@@ -459,6 +462,7 @@ export function App() {
     } else {
       window.clearTimeout(timers.current.diff);
       viewRef.current?.clear();
+      void resetDiffWorker();
       setStats(null);
       setNav({ current: -1, total: 0 });
     }

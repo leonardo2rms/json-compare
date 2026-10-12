@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { diffLines, diffTexts } from './lineDiff';
+import { diffLines, diffTexts, DiffSession } from './lineDiff';
 
 /** Reference LCS length via DP. */
 function lcsLen(a: string[], b: string[]): number {
@@ -109,5 +109,40 @@ describe('diffLines (fuzz)', () => {
     expect(performance.now() - t0).toBeLessThan(3000);
     expect(r.blocks.length / 4).toBe(3);
     expect(r.approximate).toBe(false);
+  });
+});
+
+describe('DiffSession (incremental)', () => {
+  it('gives the same result as a fresh diff after editing one side at a time', () => {
+    let seed = 99;
+    const rnd = (n: number) => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed % n;
+    };
+    const a = Array.from({ length: 300 }, (_, i) => `line ${i % 40}`);
+    let b = a.slice();
+    const session = new DiffSession();
+    session.setText('a', 1, a.join('\n'));
+    session.setText('b', 1, b.join('\n'));
+    for (let round = 2; round < 60; round++) {
+      b = b.slice();
+      b.splice(rnd(b.length), rnd(3), ...Array.from({ length: rnd(3) }, () => `new ${rnd(50)}`));
+      session.setText('b', round, b.join('\n'));
+      const inc = session.run();
+      const fresh = diffLines(a, b);
+      expect([...inc.blocks]).toEqual([...fresh.blocks]);
+      expect(inc.addedLines).toBe(fresh.addedLines);
+    }
+    expect(session.has('a', 1)).toBe(true);
+    expect(session.has('b', 59)).toBe(true);
+    expect(session.has('b', 3)).toBe(false);
+  });
+
+  it('can be reset', () => {
+    const s = new DiffSession();
+    s.setText('a', 1, 'x');
+    s.reset();
+    expect(s.has('a', 1)).toBe(false);
+    expect(() => s.run()).toThrow();
   });
 });

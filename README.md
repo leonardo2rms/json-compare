@@ -44,9 +44,13 @@ in your browser – nothing is uploaded anywhere.
   thread); a small tokenizer provides highlighting instead.
 - Typing re-runs the diff after a short debounce; stale results are discarded.
 
+- The diff worker **caches the lines of each side**, so after an edit only the changed pane is
+  re-split and re-processed.
+
 Measured with a 21 MB minified file pair (≈1.9 M lines each once pretty-printed) in headless
-Chromium: open + format + validate + diff of both files ≈ 10 s, then ≈ 90 ms per "next difference"
-and smooth scrolling. Memory is roughly 400 MB for the pair.
+Chromium: open + format + validate + diff of both files ≈ 7 s, ≈ 2 s to re-diff after an edit,
+≈ 90 ms per "next difference", and smooth scrolling. The UI stays responsive while the workers run;
+the one unavoidable pause is Monaco ingesting the formatted text (≈ 1–2 s for 35 MB).
 
 ## Usage
 

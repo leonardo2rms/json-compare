@@ -14,12 +14,19 @@ export type ToolsResponse =
   | { id: number; ok: true; text?: string }
   | { id: number; ok: false; error: JsonError };
 
-export interface DiffRequest {
-  id: number;
-  a: string;
-  b: string;
+/**
+ * Each side is identified by a `key` (the editor model's version id). The text is
+ * only sent when the worker does not already hold that exact version.
+ */
+export interface DiffSide {
+  key: number;
+  text?: string;
 }
 
+export type DiffRequest =
+  | { id: number; type: 'diff'; a: DiffSide; b: DiffSide }
+  | { id: number; type: 'reset' };
+
 export type DiffResponse =
-  | { id: number; ok: true; result: DiffResult }
-  | { id: number; ok: false; message: string };
+  | { id: number; ok: true; result?: DiffResult }
+  | { id: number; ok: false; needText?: boolean; message: string };

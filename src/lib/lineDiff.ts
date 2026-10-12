@@ -47,33 +47,78 @@ export function diffTexts(a: string, b: string): DiffResult {
 }
 
 export function diffLines(aLines: string[], bLines: string[]): DiffResult {
-  const n = aLines.length;
-  const m = bLines.length;
-
-  // Intern lines -> ids.
   const ids = new Map<string, number>();
-  const A = new Int32Array(n);
-  const B = new Int32Array(m);
-  for (let i = 0; i < n; i++) {
-    const s = aLines[i];
+  const A = internLines(aLines, ids);
+  const B = internLines(bLines, ids);
+  return diffInterned(aLines, bLines, A, B, ids.size);
+}
+
+/** Maps every line to a stable integer id (equal lines share an id). */
+export function internLines(lines: string[], ids: Map<string, number>): Int32Array {
+  const out = new Int32Array(lines.length);
+  for (let i = 0; i < lines.length; i++) {
+    const s = lines[i];
     let id = ids.get(s);
     if (id === undefined) {
       id = ids.size;
       ids.set(s, id);
     }
-    A[i] = id;
+    out[i] = id;
   }
-  for (let j = 0; j < m; j++) {
-    const s = bLines[j];
-    let id = ids.get(s);
-    if (id === undefined) {
-      id = ids.size;
-      ids.set(s, id);
+  return out;
+}
+
+/**
+ * Keeps the interned form of the two documents between diffs, so that when
+ * only one side was edited the other one does not have to be re-split and
+ * re-interned (that is where most of the time goes for multi-million line files).
+ */
+export class DiffSession {
+  private ids = new Map<string, number>();
+  private sides: Record<'a' | 'b', { key: number; lines: string[]; ids: Int32Array } | null> = { a: null, b: null };
+
+  has(side: 'a' | 'b', key: number): boolean {
+    return this.sides[side]?.key === key;
+  }
+
+  setText(side: 'a' | 'b', key: number, text: string): void {
+    const lines = text.split('\n');
+    this.compactIfBloated(lines.length);
+    this.sides[side] = { key, lines, ids: internLines(lines, this.ids) };
+  }
+
+  run(): DiffResult {
+    const { a, b } = this.sides;
+    if (!a || !b) throw new Error('DiffSession.run: both sides are required');
+    return diffInterned(a.lines, b.lines, a.ids, b.ids, this.ids.size);
+  }
+
+  reset(): void {
+    this.ids = new Map();
+    this.sides = { a: null, b: null };
+  }
+
+  /** The id table only grows while editing; rebuild it when mostly stale. */
+  private compactIfBloated(incoming: number): void {
+    const live = (this.sides.a?.lines.length ?? 0) + (this.sides.b?.lines.length ?? 0) + incoming;
+    if (this.ids.size < 2_000_000 || this.ids.size < live * 2) return;
+    this.ids = new Map();
+    for (const side of ['a', 'b'] as const) {
+      const cur = this.sides[side];
+      if (cur) cur.ids = internLines(cur.lines, this.ids);
     }
-    B[j] = id;
   }
-  const uniqueCount = ids.size;
-  ids.clear();
+}
+
+export function diffInterned(
+  aLines: string[],
+  bLines: string[],
+  A: Int32Array,
+  B: Int32Array,
+  uniqueCount: number,
+): DiffResult {
+  const n = A.length;
+  const m = B.length;
 
   const chA = new Uint8Array(n);
   const chB = new Uint8Array(m);
