@@ -28,8 +28,19 @@ Instead of *Redis Insight → download → jq → VS Code*:
 2. Click **Redis** in the toolbar → **+ Add connection**.
    For Azure Cache for Redis: host `<name>.redis.cache.windows.net`, port `6380`, **TLS on**,
    password = the access key (username usually empty). Use **Test** to check it.
-3. In a pane, pick the connection, type part of a key (or paste an exact key and press Enter) and
-   choose it. The value is fetched, **pretty-printed** and shown. Big numbers/strings stay exact.
+3. In a pane, pick the connection and click the key box. You don't need to remember how a key
+   starts: it shows the **first level** of your keys (`ahwebshop:`, `offer:`, `product:`, … with
+   their key counts) and you **drill down one level at a time**:
+   - click a folder (`offer:`) to see the next level (`1`, `2`, `3`, … – first 10, then
+     **Show 10 more**); click a key to load it. A breadcrumb (`All keys › offer`) takes you back up.
+   - or keep typing: `of` narrows to `offer:`; **Tab** completes the highlighted/first choice,
+     **↑↓** move, **Enter** opens a folder or loads a key.
+   - paste an exact key and press **Enter** to load it directly.
+   - text that isn't the start of any key falls back to "keys containing it"; text with `*`, `?`
+     or `[` is a pattern search (e.g. `product:1*`).
+   - focusing the box on an already loaded key lists its sibling keys.
+   Keys are split on `:`. The value is fetched, **pretty-printed** and shown; big numbers/strings
+   stay exact.
 4. **Compare with same key in…** loads the same key from another connection (e.g. local → prod) into
    the other pane and diffs them. **⟳ Refresh** re-fetches a key.
 5. Panes are colour-coded by environment (**prod is red**), and each pane remembers its source, so
@@ -38,8 +49,8 @@ Instead of *Redis Insight → download → jq → VS Code*:
 Notes:
 
 - **Read-only.** The server can only run `SCAN`, `TYPE`, `PTTL`, `STRLEN`, `GET` and `JSON.GET`.
-  Key search uses `SCAN` (never `KEYS`) with a time budget; if a big keyspace isn't fully scanned
-  you get a "scan more" button.
+  Browsing uses `SCAN` (never `KEYS`) with a ~2 s budget per request; on a very large keyspace
+  counts show as `~N+` and a "keep scanning" button appears until the whole keyspace has been seen.
 - Supports **string** values holding JSON and **RedisJSON** (`JSON.GET`) documents. Other types
   (hash, list, …) are reported as unsupported.
 - **Where secrets live:** connections (including passwords, for now) are saved by the local server in

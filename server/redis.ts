@@ -6,7 +6,7 @@
 import { Redis } from 'ioredis';
 import { resolveAuth } from './auth';
 import type { StoredConnection } from './config';
-import type { KeyEntry, KeyMeta, KeySearchResult, TestResult } from '../src/lib/redisTypes';
+import type { BrowseEntry, BrowseResult, KeyEntry, KeyMeta, KeySearchResult, TestResult } from '../src/lib/redisTypes';
 
 const MAX_VALUE_BYTES = (Number(process.env.MAX_VALUE_MB) || 256) * 1024 * 1024;
 const SCAN_COUNT = 500;
@@ -107,10 +107,14 @@ export function friendlyError(e: unknown): string {
   return msg;
 }
 
-/** Plain text → `*text*`; text already containing glob characters is used as-is. */
-export function toMatchPattern(q: string): string {
+/**
+ * Plain text → `*text*`. Text containing glob characters is used as a pattern
+ * unless `literal` is set (then the characters are matched as themselves).
+ */
+export function toMatchPattern(q: string, literal = false): string {
   const t = q.trim();
   if (!t) return '*';
+  if (literal) return `*${escapeGlob(t)}*`;
   return /[*?[]/.test(t) ? t : `*${t}*`;
 }
 
@@ -118,9 +122,9 @@ export function toMatchPattern(q: string): string {
  * Searches the keyspace with SCAN (never KEYS, which would block the server).
  * Stops after ~SCAN_WANTED hits or SCAN_BUDGET_MS and returns a cursor to continue.
  */
-export async function searchKeys(conn: StoredConnection, q: string, cursor = '0'): Promise<KeySearchResult> {
+export async function searchKeys(conn: StoredConnection, q: string, cursor = '0', literal = false): Promise<KeySearchResult> {
   const client = await getClient(conn);
-  const match = toMatchPattern(q);
+  const match = toMatchPattern(q, literal);
   const found = new Set<string>();
   const t0 = Date.now();
   let cur = cursor;
@@ -171,4 +175,97 @@ export async function getValue(conn: StoredConnection, key: string): Promise<{ m
     throw new UnsupportedTypeError(`Key "${key}" has type "${type}"; only string and RedisJSON values are supported`);
   }
   return { meta: { type, ttlMs, bytes: buf.length }, body: buf.toString('utf8') };
+}
+
+// ---------------------------------------------------------------------------
+// Hierarchical browsing: `offer:123:details` -> offer: -> 123: -> details
+// ---------------------------------------------------------------------------
+
+const BROWSE_COUNT = 4000; // keys examined per SCAN call (bigger = fewer round trips to a remote server)
+const BROWSE_BUDGET_MS = 2000;
+const BROWSE_ENOUGH_GROUPS = 100; // stop after a batch once we have this many choices
+const BROWSE_META_LIMIT = 100; // look up type/TTL for at most this many leaves
+
+/** Escapes Redis glob characters so user text is matched literally. */
+export function escapeGlob(s: string): string {
+  return s.replace(/[\\*?[\]]/g, '\\$&');
+}
+
+export interface Group {
+  segment: string;
+  folder: boolean;
+  leaf: boolean;
+  count: number;
+}
+
+/**
+ * Adds `keys` to `groups`, grouped by the segment that follows `prefix`
+ * (up to the next delimiter). Pure function, so it is easy to test.
+ */
+export function groupKeys(keys: string[], prefix: string, delimiter: string, groups: Map<string, Group>): void {
+  for (const key of keys) {
+    if (!key.startsWith(prefix)) continue;
+    const rest = key.slice(prefix.length);
+    const i = rest.indexOf(delimiter);
+    const segment = i === -1 ? rest : rest.slice(0, i);
+    let g = groups.get(segment);
+    if (!g) {
+      g = { segment, folder: false, leaf: false, count: 0 };
+      groups.set(segment, g);
+    }
+    if (i === -1) g.leaf = true;
+    else g.folder = true;
+    g.count++;
+  }
+}
+
+const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+
+/**
+ * Lists the choices for the next level of the key tree below `prefix`
+ * (which should end with the delimiter, or be empty for the top level).
+ * `partial` narrows the choices to segments starting with that text.
+ */
+export async function browseKeys(
+  conn: StoredConnection,
+  prefix: string,
+  partial: string,
+  cursor = '0',
+  delimiter = ':',
+): Promise<BrowseResult> {
+  const client = await getClient(conn);
+  const pattern = `${escapeGlob(prefix + partial)}*`;
+  const groups = new Map<string, Group>();
+  const t0 = Date.now();
+  let cur = cursor;
+  do {
+    const [next, batch] = (await client.scan(cur, 'MATCH', pattern, 'COUNT', BROWSE_COUNT)) as [string, string[]];
+    cur = next;
+    groupKeys(batch, prefix, delimiter, groups);
+  } while (cur !== '0' && groups.size < BROWSE_ENOUGH_GROUPS && Date.now() - t0 < BROWSE_BUDGET_MS);
+
+  const sorted = [...groups.values()].sort((a, b) => collator.compare(a.segment, b.segment));
+  const entries: BrowseEntry[] = sorted.map((g) => ({
+    segment: g.segment,
+    path: g.folder && !g.leaf ? `${prefix}${g.segment}${delimiter}` : `${prefix}${g.segment}`,
+    folder: g.folder,
+    leaf: g.leaf,
+    count: g.count,
+  }));
+
+  // Type / TTL for the first few leaves, so they can be told apart at a glance.
+  const leaves = entries.filter((e) => e.leaf).slice(0, BROWSE_META_LIMIT);
+  if (leaves.length) {
+    const pipe = client.pipeline();
+    for (const e of leaves) {
+      pipe.type(prefix + e.segment);
+      pipe.pttl(prefix + e.segment);
+    }
+    const res = (await pipe.exec()) ?? [];
+    leaves.forEach((e, i) => {
+      e.type = String(res[i * 2]?.[1] ?? 'unknown');
+      e.ttlMs = Number(res[i * 2 + 1]?.[1] ?? -1);
+    });
+  }
+  return { entries, cursor: cur, done: cur === '0' };
 }

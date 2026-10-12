@@ -53,6 +53,31 @@ export interface KeySearchResult {
   done: boolean;
 }
 
+/** One next-level choice when drilling down through keys like `offer:123:details`. */
+export interface BrowseEntry {
+  /** The segment itself, e.g. `offer` (no separator). */
+  segment: string;
+  /** Full text to put in the box: `offer:` for a folder, `offer` for a key. */
+  path: string;
+  /** Keys exist below this segment (…`offer:123`). */
+  folder: boolean;
+  /** A key exists that ends exactly here. */
+  leaf: boolean;
+  /** Keys seen so far under this segment (partial while the scan is incomplete). */
+  count: number;
+  /** Only for leaves (looked up for the first few). */
+  type?: string;
+  ttlMs?: number;
+}
+
+export interface BrowseResult {
+  entries: BrowseEntry[];
+  /** Pass back to keep scanning. */
+  cursor: string;
+  /** True when the whole keyspace has been scanned. */
+  done: boolean;
+}
+
 export interface KeyMeta {
   type: string;
   ttlMs: number;

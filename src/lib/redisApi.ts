@@ -1,4 +1,5 @@
 import type {
+  BrowseResult,
   ConnectionInfo,
   ConnectionInput,
   KeyMeta,
@@ -63,8 +64,13 @@ export const redisApi = {
   testConnection: (input: ConnectionInput) =>
     fetch('/api/connections/test', { method: 'POST', headers: MUTATION_HEADERS, body: JSON.stringify(input) }).then(json<TestResult>),
 
-  searchKeys: (connId: string, q: string, cursor = '0', signal?: AbortSignal) =>
-    fetch(`/api/connections/${connId}/keys?${new URLSearchParams({ q, cursor })}`, { signal }).then(json<KeySearchResult>),
+  /** Flat key search. `literal` matches * ? [ as themselves instead of as a pattern. */
+  searchKeys: (connId: string, q: string, cursor = '0', signal?: AbortSignal, literal = false) =>
+    fetch(`/api/connections/${connId}/keys?${new URLSearchParams({ q, cursor, ...(literal ? { literal: '1' } : {}) })}`, { signal }).then(json<KeySearchResult>),
+
+  /** Next level of the key tree below `prefix` (see BrowseResult). */
+  browse: (connId: string, prefix: string, partial: string, cursor = '0', signal?: AbortSignal) =>
+    fetch(`/api/connections/${connId}/browse?${new URLSearchParams({ prefix, partial, cursor })}`, { signal }).then(json<BrowseResult>),
 
   /** Fetches the raw JSON text of a key plus its metadata. */
   async fetchValue(connId: string, key: string): Promise<{ text: string; meta: KeyMeta }> {

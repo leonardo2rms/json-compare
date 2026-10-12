@@ -6,6 +6,7 @@ import fastifyStatic from '@fastify/static';
 import type { ConnectionInput } from '../src/lib/redisTypes';
 import { configFile, loadConnections, removeConnection, toInfo, upsertConnection, ValidationError } from './config';
 import {
+  browseKeys,
   closeAll,
   dropClient,
   friendlyError,
@@ -99,10 +100,20 @@ app.post('/api/connections/test', async (req) => {
   }
 });
 
-app.get<{ Params: { id: string }; Querystring: { q?: string; cursor?: string } }>('/api/connections/:id/keys', async (req) => {
+app.get<{ Params: { id: string }; Querystring: { q?: string; cursor?: string; literal?: string } }>('/api/connections/:id/keys', async (req) => {
   const conn = await requireConnection(req.params.id);
-  return searchKeys(conn, req.query.q ?? '', req.query.cursor || '0');
+  return searchKeys(conn, req.query.q ?? '', req.query.cursor || '0', req.query.literal === '1');
 });
+
+app.get<{ Params: { id: string }; Querystring: { prefix?: string; partial?: string; cursor?: string; delimiter?: string } }>(
+  '/api/connections/:id/browse',
+  async (req) => {
+    const conn = await requireConnection(req.params.id);
+    const { prefix = '', partial = '', cursor = '0', delimiter = ':' } = req.query;
+    if (!delimiter) throw new ValidationError('delimiter must not be empty');
+    return browseKeys(conn, prefix, partial, cursor || '0', delimiter);
+  },
+);
 
 app.get<{ Params: { id: string }; Querystring: { key?: string } }>('/api/connections/:id/value', async (req, reply) => {
   const key = req.query.key;
