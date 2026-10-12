@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { storage, type DocMeta } from '../lib/storage';
-import { formatBytes, type Side } from './EditorPane';
+import { formatBytes } from '../lib/format';
+import type { Side } from './EditorPane';
 
 interface Props {
   onClose: () => void;

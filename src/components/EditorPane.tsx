@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { JSON_LANG, monaco } from '../lib/monaco';
 import type { JsonError } from '../lib/protocol';
+import type { SourceInfo } from '../lib/redisTypes';
+import { formatBytes } from '../lib/format';
 
 export type Side = 'left' | 'right';
 
@@ -13,6 +15,8 @@ export interface SideState {
   status: 'idle' | 'busy' | 'valid' | 'error';
   busyLabel?: string;
   error?: JsonError;
+  /** Redis origin of the content, if it was fetched from Redis. */
+  source: SourceInfo | null;
 }
 
 export interface EditorHandle {
@@ -25,6 +29,10 @@ interface Props {
   label: string;
   state: SideState;
   fontSize: number;
+  /** Optional row rendered under the header (Redis key picker). */
+  sourceBar?: ReactNode;
+  /** Colour-codes the pane by environment (e.g. env-prod). */
+  envClass?: string;
   onReady: (handle: EditorHandle) => void;
   onNameChange: (name: string) => void;
   onOpenFile: (file: File) => void;
@@ -34,12 +42,6 @@ interface Props {
   onClear: () => void;
   onZoom: (delta: number) => void;
   onGoToError: () => void;
-}
-
-export function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 export function EditorPane(p: Props) {
@@ -123,7 +125,7 @@ export function EditorPane(p: Props) {
 
   return (
     <section
-      className={`pane${dragging ? ' dragging' : ''}`}
+      className={`pane${dragging ? ' dragging' : ''}${p.envClass ? ' ' + p.envClass : ''}`}
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes('Files')) {
           e.preventDefault();
@@ -178,6 +180,7 @@ export function EditorPane(p: Props) {
           }}
         />
       </div>
+      {p.sourceBar}
       <div className="editor-wrap">
         <div ref={hostRef} className="editor" />
         {empty && state.status !== 'busy' && (

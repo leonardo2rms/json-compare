@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EditorPane, type EditorHandle, type Side, type SideState } from './components/EditorPane';
 import { Library } from './components/Library';
+import { Connections } from './components/Connections';
+import { SourceBar } from './components/SourceBar';
 import { DiffView } from './lib/diffView';
 import { monaco } from './lib/monaco';
 import { diffInWorker, formatInWorker, resetDiffWorker, validateInWorker } from './lib/workers';
 import { loadSettings, saveSettings, storage, type DocMeta, type Settings } from './lib/storage';
 import type { JsonError } from './lib/protocol';
+import { isApiAvailable, redisApi } from './lib/redisApi';
+import type { ConnectionInfo, SourceInfo } from './lib/redisTypes';
 import { SAMPLE_LEFT, SAMPLE_RIGHT } from './sample';
 
 const SIDES: Side[] = ['left', 'right'];
@@ -23,6 +27,7 @@ const emptySide = (name: string): SideState => ({
   size: 0,
   lines: 1,
   status: 'idle',
+  source: null,
 });
 
 interface DiffStats {
@@ -39,6 +44,8 @@ interface LoadOptions {
   unsaved?: boolean;
   /** Pretty-print (if valid JSON) before showing. */
   format?: boolean;
+  /** Where the text came from. `null` clears it; omit to leave it unchanged. */
+  source?: SourceInfo | null;
 }
 
 export function App() {
@@ -57,6 +64,10 @@ export function App() {
   const [stats, setStats] = useState<DiffStats | null>(null);
   const [nav, setNav] = useState({ current: -1, total: 0 });
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showConnections, setShowConnections] = useState(false);
+  const [redis, setRedis] = useState<{ available: boolean; connections: ConnectionInfo[] }>({ available: false, connections: [] });
+  const connectionsRef = useRef<ConnectionInfo[]>([]);
+  connectionsRef.current = redis.connections;
   const [toast, setToast] = useState<{ msg: string; kind: 'info' | 'error' } | null>(null);
 
   const handles = useRef<Partial<Record<Side, EditorHandle>>>({});
@@ -127,7 +138,7 @@ export function App() {
       autosaveDirty.current[side] = false;
       const s = sidesRef.current[side];
       try {
-        await storage.saveWorkspace(side, { text: model.getValue(), name: s.name, docId: s.docId, unsaved: s.unsaved });
+        await storage.saveWorkspace(side, { text: model.getValue(), name: s.name, docId: s.docId, unsaved: s.unsaved, source: s.source });
       } catch (e) {
         autosaveDirty.current[side] = true;
         showToast(`Autosave failed: ${e instanceof Error ? e.message : e}`, 'error');
@@ -242,6 +253,7 @@ export function App() {
       ...(opts.name !== undefined ? { name: opts.name } : {}),
       ...(opts.docId !== undefined ? { docId: opts.docId } : {}),
       ...(opts.unsaved !== undefined ? { unsaved: opts.unsaved } : {}),
+      ...(opts.source !== undefined ? { source: opts.source } : {}),
       status: text.length === 0 ? 'idle' : validated ? (error ? 'error' : 'valid') : 'idle',
       error: error ?? undefined,
     });
@@ -284,6 +296,7 @@ export function App() {
         name: file.name,
         docId: null,
         unsaved: true,
+        source: null,
         format: settingsRef.current.autoFormat,
       });
     } catch (e) {
@@ -310,7 +323,8 @@ export function App() {
   const downloadSide = (side: Side) => {
     const h = handles.current[side];
     if (!h) return;
-    const name = sidesRef.current[side].name.trim() || 'document.json';
+    // Redis keys often contain ':' (and other characters Windows refuses in file names).
+    const name = (sidesRef.current[side].name.trim() || 'document.json').replace(/[\\/:*?"<>|]+/g, '_');
     const blob = new Blob([h.model.getValue()], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -323,7 +337,7 @@ export function App() {
   const clearSide = (side: Side) => {
     const s = sidesRef.current[side];
     if (s.unsaved && s.size > 0 && !confirm('Clear this pane? Changes not saved to the library will be lost.')) return;
-    void loadText(side, '', { name: side === 'left' ? 'Original.json' : 'Modified.json', docId: null, unsaved: false });
+    void loadText(side, '', { name: side === 'left' ? 'Original.json' : 'Modified.json', docId: null, unsaved: false, source: null });
   };
 
   const loadFromLibrary = async (side: Side, doc: DocMeta) => {
@@ -331,10 +345,60 @@ export function App() {
     try {
       const text = await storage.getDocText(doc.id);
       if (text === undefined) throw new Error('document content is missing');
-      await loadText(side, text, { name: doc.name, docId: doc.id, unsaved: false, format: false });
+      await loadText(side, text, { name: doc.name, docId: doc.id, unsaved: false, source: null, format: false });
     } catch (e) {
       showToast(`Could not open “${doc.name}”: ${e instanceof Error ? e.message : e}`, 'error');
     }
+  };
+
+  // ---------- Redis ----------
+
+  const reloadConnections = useCallback(async () => {
+    const available = await isApiAvailable();
+    if (!available) {
+      setRedis({ available: false, connections: [] });
+      return;
+    }
+    try {
+      setRedis({ available: true, connections: await redisApi.listConnections() });
+    } catch (e) {
+      setRedis({ available: true, connections: [] });
+      showToast(`Could not load Redis connections: ${e instanceof Error ? e.message : e}`, 'error');
+    }
+  }, [showToast]);
+
+  /** Fetches a key into a pane (always pretty-printed; Redis values are usually minified). */
+  const fetchKey = async (side: Side, connId: string, key: string) => {
+    const conn = connectionsRef.current.find((c) => c.id === connId);
+    if (!conn) return;
+    const prev = sidesRef.current[side];
+    if (prev.unsaved && prev.size > 0 && !confirm('This pane has changes that are not saved to the library. Replace them?')) return;
+    patchSide(side, { status: 'busy', busyLabel: `Fetching from ${conn.name}…` });
+    try {
+      const { text, meta } = await redisApi.fetchValue(connId, key);
+      if (settingsRef.current.lastConnId !== connId) updateSettings({ lastConnId: connId });
+      await loadText(side, text, {
+        name: key,
+        docId: null,
+        unsaved: false,
+        format: true,
+        source: { connId, key, fetchedAt: Date.now(), meta },
+      });
+    } catch (e) {
+      patchSide(side, { status: prev.status, busyLabel: undefined, error: prev.error });
+      showToast(`Could not fetch “${key}” from ${conn.name}: ${e instanceof Error ? e.message : e}`, 'error');
+    }
+  };
+
+  const refreshSide = (side: Side) => {
+    const src = sidesRef.current[side].source;
+    if (src) void fetchKey(side, src.connId, src.key);
+  };
+
+  /** Loads the same key from another connection into the opposite pane. */
+  const compareWith = (side: Side, connId: string) => {
+    const src = sidesRef.current[side].source;
+    if (src) void fetchKey(side === 'left' ? 'right' : 'left', connId, src.key);
   };
 
   const goToError = (side: Side) => {
@@ -412,7 +476,7 @@ export function App() {
           const saved = await storage.loadWorkspace(side);
           if (saved) {
             restored = true;
-            await loadText(side, saved.text, { name: saved.name, docId: saved.docId, unsaved: saved.unsaved, format: false });
+            await loadText(side, saved.text, { name: saved.name, docId: saved.docId, unsaved: saved.unsaved, source: saved.source ?? null, format: false });
           }
         }
       } catch (e) {
@@ -439,6 +503,10 @@ export function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
+
+  useEffect(() => {
+    void reloadConnections();
+  }, [reloadConnections]);
 
   // ---------- reactive settings ----------
 
@@ -486,6 +554,12 @@ export function App() {
   }, []);
 
   // ---------- render ----------
+
+  const envClassFor = (side: Side): string | undefined => {
+    const src = sides[side].source;
+    const env = src && redis.connections.find((c) => c.id === src.connId)?.env;
+    return env ? `env-${env}` : undefined;
+  };
 
   const { compare, fontSize, sortKeys, autoFormat, theme } = settings;
   const counter = !compare
@@ -563,6 +637,15 @@ export function App() {
           </button>
         </div>
 
+        {redis.available ? (
+          <button onClick={() => setShowConnections(true)} title="Manage Redis connections">
+            Redis
+          </button>
+        ) : (
+          <span className="muted small" title="Run `npm run dev` or `npm start` to start the local server and load JSON straight from Redis">
+            Redis: server not running
+          </span>
+        )}
         <button onClick={() => setShowLibrary(true)}>Library</button>
         <button onClick={() => updateSettings({ theme: theme === 'dark' ? 'light' : 'dark' })} aria-label="Toggle theme" title="Toggle light / dark">
           {theme === 'dark' ? '☀' : '☾'}
@@ -577,6 +660,22 @@ export function App() {
             label={side === 'left' ? 'Original' : 'Modified'}
             state={sides[side]}
             fontSize={fontSize}
+            envClass={envClassFor(side)}
+            sourceBar={
+              redis.available ? (
+                <SourceBar
+                  connections={redis.connections}
+                  source={sides[side].source}
+                  defaultConnId={settings.lastConnId}
+                  busy={sides[side].status === 'busy'}
+                  onLoad={(connId, key) => void fetchKey(side, connId, key)}
+                  onRefresh={() => refreshSide(side)}
+                  onCompareWith={(connId) => compareWith(side, connId)}
+                  onManage={() => setShowConnections(true)}
+                  onConnChange={(id) => updateSettings({ lastConnId: id })}
+                />
+              ) : undefined
+            }
             onReady={onReady(side)}
             onNameChange={(name) => {
               patchSide(side, { name });
@@ -593,6 +692,9 @@ export function App() {
         ))}
       </main>
 
+      {showConnections && (
+        <Connections connections={redis.connections} onChanged={() => void reloadConnections()} onClose={() => setShowConnections(false)} />
+      )}
       {showLibrary && (
         <Library onClose={() => setShowLibrary(false)} onLoad={(s, d) => void loadFromLibrary(s, d)} onError={(m) => showToast(m, 'error')} />
       )}

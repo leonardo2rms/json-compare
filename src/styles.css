@@ -452,3 +452,209 @@ button.danger {
     grid-template-rows: 1fr 1fr;
   }
 }
+
+/* ---- Redis: environments ---- */
+:root {
+  --env-local: #6b7280;
+  --env-dev: #2563eb;
+  --env-staging: #d97706;
+  --env-prod: #dc2626;
+}
+:root[data-theme='dark'] {
+  --env-local: #8b949e;
+  --env-dev: #58a6ff;
+  --env-staging: #e3a008;
+  --env-prod: #ff6b6b;
+}
+.env-chip {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--env-dev);
+}
+.env-chip.env-local { background: var(--env-local); }
+.env-chip.env-staging { background: var(--env-staging); }
+.env-chip.env-prod { background: var(--env-prod); }
+/* A bar along the top of a pane fed from Redis, coloured by environment (prod = red). */
+.pane[class*='env-']::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 5;
+  background: var(--env-dev);
+  pointer-events: none;
+}
+.pane.env-local::before { background: var(--env-local); }
+.pane.env-staging::before { background: var(--env-staging); }
+.pane.env-prod::before { background: var(--env-prod); }
+
+/* ---- Redis: key picker ---- */
+.source-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.source-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.source-row.meta {
+  min-height: 24px;
+}
+.small {
+  font-size: 12px;
+}
+.conn-select,
+.compare-select,
+.conn-form select {
+  font: inherit;
+  color: var(--text);
+  background: var(--btn);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 6px;
+  max-width: 220px;
+}
+.conn-select {
+  border-left: 4px solid var(--env-dev);
+  font-weight: 500;
+}
+.conn-select.env-local { border-left-color: var(--env-local); }
+.conn-select.env-staging { border-left-color: var(--env-staging); }
+.conn-select.env-prod { border-left-color: var(--env-prod); }
+.key-box {
+  position: relative;
+  flex: 1;
+  min-width: 120px;
+}
+.key-input,
+.conn-form input:not([type='checkbox']) {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  width: 100%;
+}
+.key-input {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+.key-dropdown {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.dd-item {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+.dd-item.hi {
+  background: var(--btn-hover);
+}
+.dd-key {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dd-type,
+.dd-ttl {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.dd-note {
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.dd-note.err {
+  color: var(--del);
+}
+.dd-more {
+  display: block;
+  width: 100%;
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 8px 8px;
+  background: transparent;
+  color: var(--accent);
+  padding: 7px;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+button.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 85%, #000);
+}
+
+/* ---- Redis: connection form ---- */
+.conn-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+}
+.conn-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.conn-form label.check {
+  flex-direction: row;
+  align-items: center;
+  color: var(--text);
+}
+.conn-form .wide,
+.wide {
+  grid-column: 1 / -1;
+}
+.form-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+.form-error {
+  color: var(--del);
+  margin: 6px 0 0;
+}
+.test-result {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--bg);
+}
+.test-result.ok { color: var(--add); }
+.test-result.err { color: var(--del); }
+.test-result.busy { color: var(--muted); }

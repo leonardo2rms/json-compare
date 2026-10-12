@@ -1,7 +1,7 @@
 # JSON Compare
 
-A fast, client-side JSON comparison tool built for **large documents (20 MB+)**. Everything runs
-in your browser – nothing is uploaded anywhere.
+A fast JSON comparison tool built for **large documents (20 MB+)**. Parsing, formatting and diffing
+run in your browser; the optional local server only talks to *your* Redis instances.
 
 ## Features
 
@@ -17,7 +17,43 @@ in your browser – nothing is uploaded anywhere.
 - **Format** (pretty-print) with optional **Sort keys**, so key order is not reported as a difference.
   Numbers and strings are preserved exactly as written (no big-integer precision loss).
 - Strict JSON validation with the exact line/column of the first error (click it to jump there).
+- **Load JSON straight from Redis** (read-only), see below.
 - Light / dark theme.
+
+## Redis (Azure Cache for Redis, local, …)
+
+Instead of *Redis Insight → download → jq → VS Code*:
+
+1. Start the app with the local server: `npm run dev` (or `npm start` for a production build).
+2. Click **Redis** in the toolbar → **+ Add connection**.
+   For Azure Cache for Redis: host `<name>.redis.cache.windows.net`, port `6380`, **TLS on**,
+   password = the access key (username usually empty). Use **Test** to check it.
+3. In a pane, pick the connection, type part of a key (or paste an exact key and press Enter) and
+   choose it. The value is fetched, **pretty-printed** and shown. Big numbers/strings stay exact.
+4. **Compare with same key in…** loads the same key from another connection (e.g. local → prod) into
+   the other pane and diffs them. **⟳ Refresh** re-fetches a key.
+5. Panes are colour-coded by environment (**prod is red**), and each pane remembers its source, so
+   it survives a page reload.
+
+Notes:
+
+- **Read-only.** The server can only run `SCAN`, `TYPE`, `PTTL`, `STRLEN`, `GET` and `JSON.GET`.
+  Key search uses `SCAN` (never `KEYS`) with a time budget; if a big keyspace isn't fully scanned
+  you get a "scan more" button.
+- Supports **string** values holding JSON and **RedisJSON** (`JSON.GET`) documents. Other types
+  (hash, list, …) are reported as unsupported.
+- **Where secrets live:** connections (including passwords, for now) are saved by the local server in
+  `~/.json-compare/connections.json` with owner-only permissions (override the folder with
+  `JSON_COMPARE_HOME`). They are never sent to the browser.
+- **Local-only server:** it listens on `127.0.0.1`, sends no CORS headers, rejects unexpected `Host`
+  headers (DNS rebinding) and requires a custom header for changes. Port: `PORT` (default 8787).
+- Not supported yet: Redis Cluster mode (single endpoint only), Entra ID / Key Vault credentials.
+
+### Adding other ways to authenticate (Entra ID, Key Vault)
+
+All credential handling goes through `resolveAuth()` in `server/auth.ts`. To add a new method, add
+an `auth.type` to `src/lib/redisTypes.ts`, handle it in `resolveAuth()` (it can be async, so it can
+fetch a token or a Key Vault secret before connecting) and add the fields to the connection form.
 
 ## Tech stack
 
@@ -29,6 +65,7 @@ in your browser – nothing is uploaded anywhere.
 | Editor       | Monaco Editor (virtualised rendering – 2M lines scroll smoothly)        |
 | Diff / parse | Custom engine running in **Web Workers** (see below)                    |
 | Persistence  | IndexedDB (documents) + localStorage (small settings)                   |
+| Redis access | Small local Node server: Fastify + ioredis (read-only)                  |
 | Tests        | Vitest                                                                  |
 
 ## How it stays fast
@@ -56,12 +93,15 @@ the one unavoidable pause is Monaco ingesting the formatted text (≈ 1–2 s fo
 
 ```bash
 npm install
-npm run dev        # development server
+npm run dev        # Vite dev server + local API server (needed for Redis)
+npm start          # production build, served together with the API on http://127.0.0.1:8787
+npm run dev:web    # UI only (no Redis)
 npm run build      # type-check + production build into dist/
-npm run preview    # serve the production build
-npm test           # unit tests (parser, formatter, diff)
+npm test           # unit tests (parser, formatter, diff, server config)
 npm run bench      # engine benchmark on a generated ~20 MB document
 ```
+
+Without the server (e.g. `npm run dev:web` or any static hosting) everything except Redis works.
 
 Tips:
 
@@ -82,10 +122,18 @@ src/
   lib/diffView.ts         paints a diff onto two Monaco editors, scroll sync, navigation
   lib/storage.ts          IndexedDB + settings
   lib/workers.ts          promise-based worker clients
+  lib/redisApi.ts         browser client for the local API
   workers/                tools.worker (format/validate), diff.worker
+server/
+  index.ts                local API (connections, key search, value fetch) + static app
+  redis.ts                read-only Redis access (SCAN / GET / JSON.GET)
+  config.ts, auth.ts      connection storage and credential resolution
 scripts/bench.ts          performance benchmark
 ```
 
 ## Roadmap
 
-- Desktop app (Tauri wrapper around this same web app) for opening files straight from disk.
+- Entra ID / Key Vault authentication for Azure Cache for Redis.
+- jq-style query bar, "ignore fields" for diffs, and a path-based diff summary.
+- Snapshots of fetched keys (compare with "yesterday's" value) and pinned key pairs.
+- Desktop app (Tauri wrapper around this same web app, with the server bundled).

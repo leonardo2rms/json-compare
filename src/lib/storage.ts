@@ -7,6 +7,8 @@
  *   workspace – autosaved state of the two editor panes ('left' / 'right')
  */
 
+import type { SourceInfo } from './redisTypes';
+
 export interface DocMeta {
   id: string;
   name: string;
@@ -21,6 +23,8 @@ export interface WorkspaceSide {
   docId: string | null;
   /** True when the text differs from what was last explicitly saved. */
   unsaved: boolean;
+  /** Redis key this pane was loaded from (so it can be refreshed after a reload). */
+  source?: SourceInfo | null;
 }
 
 const DB_NAME = 'json-compare';
@@ -109,6 +113,8 @@ export interface Settings {
   sortKeys: boolean;
   autoFormat: boolean;
   theme: 'light' | 'dark';
+  /** Last Redis connection picked in a key search. */
+  lastConnId?: string;
 }
 
 export const defaultSettings = (): Settings => ({
