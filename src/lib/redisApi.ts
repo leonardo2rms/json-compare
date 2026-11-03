@@ -96,4 +96,4 @@ export function formatTtl(ms: number): string {
   return `${Math.round(s / 86400)}d`;
 }
 
-export const ENV_LABEL: Record<string, string> = { local: 'local', dev: 'dev', staging: 'staging', prod: 'PROD' };
+export const ENV_LABEL: Record<string, string> = { local: 'local', tst: 'tst', acc: 'acc', prd: 'PRD' };

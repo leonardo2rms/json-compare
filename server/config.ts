@@ -2,7 +2,7 @@ import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { ENVS, type ConnectionInfo, type ConnectionInput, type Env } from '../src/lib/redisTypes';
+import { ENVS, normalizeEnv, type ConnectionInfo, type ConnectionInput, type Env } from '../src/lib/redisTypes';
 
 /** Connection as stored on disk (includes the secret). */
 export interface StoredConnection {
@@ -22,7 +22,8 @@ export const configFile = join(dir, 'connections.json');
 export async function loadConnections(): Promise<StoredConnection[]> {
   try {
     const raw = JSON.parse(await readFile(configFile, 'utf8')) as { connections?: StoredConnection[] };
-    return raw.connections ?? [];
+    // Older files used dev/staging/prod; translate on read (written back in the new form on the next save).
+    return (raw.connections ?? []).map((c) => ({ ...c, env: normalizeEnv(c.env) }));
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw new Error(`Could not read ${configFile}: ${(e as Error).message}`);

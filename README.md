@@ -7,12 +7,13 @@ run in your browser; the optional local server only talks to *your* Redis instan
 
 - **Side-by-side diff** with line highlighting, intra-line highlighting of changed values,
   striped filler rows that keep both panes aligned, and diff marks on the scrollbar.
-- **Compare on/off** switch. Off = two independent editors (no diffing work is done).
+- **Compare on/off** switch. It is **off when the app starts**; off = two independent editors (no diffing work is done). Choosing *Compare with same key in…* switches it on for you.
+- **One or two panes.** Close the right pane (✕) and the left one takes the whole screen – handy for just inspecting a key. **＋ Second pane** brings it back; the choice is remembered.
 - **Jump between differences** with ▲ Prev / ▼ Next (or `F7` / `Shift+F7`), with a `3 / 47` counter.
 - **Adjustable font size** (`A−` / `A+` or `Ctrl` + mouse wheel) to fit more JSON on screen.
 - **Never lose changes**
   - Both panes are *autosaved* to IndexedDB as you type and restored on reload.
-  - **Save** (`Ctrl+S`) stores a named document in the **Library**; open it into either pane later.
+  - **Save** (`Ctrl+S`) asks for a name (pre-filled, e.g. `user:1234 (prd, 2026-11-03 14:05)`) and stores the document in the **Library**; open it into either pane later. A copy saved from a Redis key remembers which connection and key it came from.
   - **Download** exports a pane as a `.json` file; **Open** / drag-and-drop loads one.
 - **Format** (pretty-print) with optional **Sort keys**, so key order is not reported as a difference.
   Numbers and strings are preserved exactly as written (no big-integer precision loss).
@@ -43,8 +44,12 @@ Instead of *Redis Insight → download → jq → VS Code*:
    stay exact.
 4. **Compare with same key in…** loads the same key from another connection (e.g. local → prod) into
    the other pane and diffs them. **⟳ Refresh** re-fetches a key.
-5. Panes are colour-coded by environment (**prod is red**), and each pane remembers its source, so
-   it survives a page reload.
+5. Panes are colour-coded by environment (**prd is red**, acc orange, tst blue, local grey), and each
+   pane remembers its source, so it survives a page reload.
+6. **Live vs. copy:** a live Redis pane has a solid environment-coloured bar, a coloured env tag and a
+   *Refresh* button. A document opened from the **Library** shows a dashed violet bar and a
+   **SAVED COPY** banner (with where it was taken from and a *Load current value from Redis*
+   button); a file from disk shows a grey **FILE** banner. Neither is live Redis data.
 
 Notes:
 
@@ -58,6 +63,7 @@ Notes:
   `JSON_COMPARE_HOME`). They are never sent to the browser.
 - **Local-only server:** it listens on `127.0.0.1`, sends no CORS headers, rejects unexpected `Host`
   headers (DNS rebinding) and requires a custom header for changes. Port: `PORT` (default 8787).
+- Environments are `local`, `tst`, `acc` and `prd`. Connection files written by older versions (`dev` / `staging` / `prod`) are translated automatically.
 - Not supported yet: Redis Cluster mode (single endpoint only), Entra ID / Key Vault credentials.
 
 ### Adding other ways to authenticate (Entra ID, Key Vault)

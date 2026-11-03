@@ -456,15 +456,15 @@ button.danger {
 /* ---- Redis: environments ---- */
 :root {
   --env-local: #6b7280;
-  --env-dev: #2563eb;
-  --env-staging: #d97706;
-  --env-prod: #dc2626;
+  --env-tst: #2563eb;
+  --env-acc: #d97706;
+  --env-prd: #dc2626;
 }
 :root[data-theme='dark'] {
   --env-local: #8b949e;
-  --env-dev: #58a6ff;
-  --env-staging: #e3a008;
-  --env-prod: #ff6b6b;
+  --env-tst: #58a6ff;
+  --env-acc: #e3a008;
+  --env-prd: #ff6b6b;
 }
 .env-chip {
   display: inline-block;
@@ -475,11 +475,11 @@ button.danger {
   padding: 1px 6px;
   border-radius: 8px;
   color: #fff;
-  background: var(--env-dev);
+  background: var(--env-tst);
 }
 .env-chip.env-local { background: var(--env-local); }
-.env-chip.env-staging { background: var(--env-staging); }
-.env-chip.env-prod { background: var(--env-prod); }
+.env-chip.env-acc { background: var(--env-acc); }
+.env-chip.env-prd { background: var(--env-prd); }
 /* A bar along the top of a pane fed from Redis, coloured by environment (prod = red). */
 .pane[class*='env-']::before {
   content: '';
@@ -489,12 +489,12 @@ button.danger {
   right: 0;
   height: 3px;
   z-index: 5;
-  background: var(--env-dev);
+  background: var(--env-tst);
   pointer-events: none;
 }
 .pane.env-local::before { background: var(--env-local); }
-.pane.env-staging::before { background: var(--env-staging); }
-.pane.env-prod::before { background: var(--env-prod); }
+.pane.env-acc::before { background: var(--env-acc); }
+.pane.env-prd::before { background: var(--env-prd); }
 
 /* ---- Redis: key picker ---- */
 .source-bar {
@@ -528,12 +528,12 @@ button.danger {
   max-width: 220px;
 }
 .conn-select {
-  border-left: 4px solid var(--env-dev);
+  border-left: 4px solid var(--env-tst);
   font-weight: 500;
 }
 .conn-select.env-local { border-left-color: var(--env-local); }
-.conn-select.env-staging { border-left-color: var(--env-staging); }
-.conn-select.env-prod { border-left-color: var(--env-prod); }
+.conn-select.env-acc { border-left-color: var(--env-acc); }
+.conn-select.env-prd { border-left-color: var(--env-prd); }
 .key-box {
   position: relative;
   flex: 1;
@@ -696,4 +696,100 @@ button.primary:hover:not(:disabled) {
   position: sticky;
   bottom: 0;
   background: var(--panel);
+}
+
+/* ---- single-pane mode ---- */
+.panes.single {
+  grid-template-columns: 1fr;
+}
+.panes.single .pane:nth-child(2) {
+  display: none; /* kept mounted so its content survives; just not shown */
+}
+.close-pane {
+  padding: 3px 8px;
+  margin-left: 4px;
+}
+
+/* ---- "this is not live Redis data" ---- */
+:root {
+  --snap: #7c3aed;
+  --snap-bg: rgba(124, 58, 237, 0.1);
+}
+:root[data-theme='dark'] {
+  --snap: #a78bfa;
+  --snap-bg: rgba(167, 139, 250, 0.14);
+}
+.origin-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--snap-bg);
+}
+.origin-banner.file {
+  background: color-mix(in srgb, var(--env-local) 14%, transparent);
+}
+.origin-banner code {
+  font-size: 11px;
+}
+.origin-chip {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 7px;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--snap);
+}
+.origin-banner.file .origin-chip {
+  background: var(--env-local);
+}
+.pane.origin-library::before,
+.pane.origin-file::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 5;
+  pointer-events: none;
+  background: repeating-linear-gradient(90deg, var(--snap) 0 8px, transparent 8px 12px);
+}
+.pane.origin-file::before {
+  background: repeating-linear-gradient(90deg, var(--env-local) 0 8px, transparent 8px 12px);
+}
+
+/* ---- save dialog ---- */
+.modal.small-modal {
+  width: min(480px, 94vw);
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.field input {
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 9px;
+}
+.small-modal .check {
+  margin: 8px 0 0;
+}
+
+/* With one pane there is no "original vs modified", so don't colour-code the tag. */
+.panes.single .pane-tag.left {
+  color: var(--muted);
+  background: var(--btn);
 }

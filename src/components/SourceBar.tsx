@@ -55,10 +55,14 @@ export function SourceBar(p: Props) {
   // Follow the pane when its source is changed from elsewhere (restore, "compare with…", refresh).
   const srcKey = p.source ? `${p.source.connId}\u0000${p.source.key}` : '';
   useEffect(() => {
+    typedRef.current = false;
     if (p.source) {
-      typedRef.current = false;
       setConnId(p.source.connId);
       setQuery(p.source.key);
+    } else {
+      // The pane now holds something that is not a Redis key (library copy, file, cleared):
+      // don't leave the previous key sitting in the box as if it were the source.
+      setQuery('');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [srcKey]);
@@ -208,11 +212,12 @@ export function SourceBar(p: Props) {
   }
 
   const meta = p.source?.meta;
+  const sourceConn = p.source && p.connections.find((c) => c.id === p.source!.connId);
   return (
     <div className="source-bar" ref={rootRef}>
       <div className="source-row">
         <select
-          className={`conn-select env-${conn?.env ?? 'dev'}`}
+          className={`conn-select env-${conn?.env ?? 'tst'}`}
           value={connId}
           onChange={(e) => {
             setConnId(e.target.value);
@@ -361,8 +366,9 @@ export function SourceBar(p: Props) {
           <button onClick={p.onRefresh} disabled={p.busy} title="Fetch the key again">
             ⟳ Refresh
           </button>
+          {sourceConn && <span className={`env-chip env-${sourceConn.env}`} title={`Live from ${sourceConn.name}`}>{ENV_LABEL[sourceConn.env]}</span>}
           <span className="muted small">
-            fetched {formatClock(p.source.fetchedAt)} · {meta.type === 'ReJSON-RL' ? 'RedisJSON' : meta.type} · {formatBytes(meta.bytes)} · TTL {formatTtl(meta.ttlMs)}
+            {sourceConn?.name} · fetched {formatClock(p.source.fetchedAt)} · {meta.type === 'ReJSON-RL' ? 'RedisJSON' : meta.type} · {formatBytes(meta.bytes)} · TTL {formatTtl(meta.ttlMs)}
           </span>
           <div className="spacer" />
           <select

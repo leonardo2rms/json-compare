@@ -23,7 +23,7 @@ interface FormState {
 
 const blank = (): FormState => ({
   name: '',
-  env: 'dev',
+  env: 'tst',
   host: '',
   port: '6380',
   tls: true,

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -15,7 +15,7 @@ beforeAll(async () => {
 
 const input = (over: Partial<ConnectionInput> = {}): ConnectionInput => ({
   name: 'Prod',
-  env: 'prod',
+  env: 'prd',
   host: 'x.redis.cache.windows.net',
   port: 6380,
   tls: true,
@@ -53,6 +53,22 @@ describe('connection config', () => {
     await expect(cfg.upsertConnection(input({ port: 70000 }))).rejects.toThrow(/Port/);
     await expect(cfg.upsertConnection(input({ host: '' }))).rejects.toThrow(/Host/);
     await expect(cfg.upsertConnection(input({ env: 'nope' as never }))).rejects.toThrow(/Environment/);
+  });
+
+  it('translates environment names from older versions when loading', async () => {
+    writeFileSync(
+      cfg.configFile,
+      JSON.stringify({
+        connections: ['dev', 'staging', 'prod', 'local', 'weird'].map((env, i) => ({
+          id: `id${i}`, name: env, env, host: 'h', port: 1, tls: false, db: 0, auth: { type: 'password' },
+        })),
+      }),
+    );
+    const envs = (await cfg.loadConnections()).map((c) => c.env);
+    expect(envs).toEqual(['tst', 'acc', 'prd', 'local', 'tst']);
+    // restore a single connection for the following test
+    writeFileSync(cfg.configFile, JSON.stringify({ connections: [] }));
+    await cfg.upsertConnection(input({ name: 'Again' }));
   });
 
   it('removes connections', async () => {

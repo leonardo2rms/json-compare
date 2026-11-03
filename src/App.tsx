@@ -3,13 +3,15 @@ import { EditorPane, type EditorHandle, type Side, type SideState } from './comp
 import { Library } from './components/Library';
 import { Connections } from './components/Connections';
 import { SourceBar } from './components/SourceBar';
+import { SaveDialog } from './components/SaveDialog';
+import { OriginBanner } from './components/OriginBanner';
 import { DiffView } from './lib/diffView';
 import { monaco } from './lib/monaco';
 import { diffInWorker, formatInWorker, resetDiffWorker, validateInWorker } from './lib/workers';
-import { loadSettings, saveSettings, storage, type DocMeta, type Settings } from './lib/storage';
+import { loadSettings, saveSettings, storage, type DocMeta, type PaneOrigin, type Settings } from './lib/storage';
 import type { JsonError } from './lib/protocol';
-import { isApiAvailable, redisApi } from './lib/redisApi';
-import type { ConnectionInfo, SourceInfo } from './lib/redisTypes';
+import { ENV_LABEL, isApiAvailable, redisApi } from './lib/redisApi';
+import type { ConnectionInfo, SavedFrom, SourceInfo } from './lib/redisTypes';
 import { SAMPLE_LEFT, SAMPLE_RIGHT } from './sample';
 
 const SIDES: Side[] = ['left', 'right'];
@@ -28,6 +30,7 @@ const emptySide = (name: string): SideState => ({
   lines: 1,
   status: 'idle',
   source: null,
+  origin: null,
 });
 
 interface DiffStats {
@@ -46,7 +49,15 @@ interface LoadOptions {
   format?: boolean;
   /** Where the text came from. `null` clears it; omit to leave it unchanged. */
   source?: SourceInfo | null;
+  /** Library copy / file origin. `null` clears it; omit to leave it unchanged. */
+  origin?: PaneOrigin | null;
 }
+
+/** `2026-11-03 14:05`, local time. */
+const stamp = (d = new Date()) => {
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+};
 
 export function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
@@ -65,6 +76,7 @@ export function App() {
   const [nav, setNav] = useState({ current: -1, total: 0 });
   const [showLibrary, setShowLibrary] = useState(false);
   const [showConnections, setShowConnections] = useState(false);
+  const [saveDialog, setSaveDialog] = useState<{ side: Side; defaultName: string } | null>(null);
   const [redis, setRedis] = useState<{ available: boolean; connections: ConnectionInfo[] }>({ available: false, connections: [] });
   const connectionsRef = useRef<ConnectionInfo[]>([]);
   connectionsRef.current = redis.connections;
@@ -138,7 +150,7 @@ export function App() {
       autosaveDirty.current[side] = false;
       const s = sidesRef.current[side];
       try {
-        await storage.saveWorkspace(side, { text: model.getValue(), name: s.name, docId: s.docId, unsaved: s.unsaved, source: s.source });
+        await storage.saveWorkspace(side, { text: model.getValue(), name: s.name, docId: s.docId, unsaved: s.unsaved, source: s.source, origin: s.origin });
       } catch (e) {
         autosaveDirty.current[side] = true;
         showToast(`Autosave failed: ${e instanceof Error ? e.message : e}`, 'error');
@@ -254,6 +266,7 @@ export function App() {
       ...(opts.docId !== undefined ? { docId: opts.docId } : {}),
       ...(opts.unsaved !== undefined ? { unsaved: opts.unsaved } : {}),
       ...(opts.source !== undefined ? { source: opts.source } : {}),
+      ...(opts.origin !== undefined ? { origin: opts.origin } : {}),
       status: text.length === 0 ? 'idle' : validated ? (error ? 'error' : 'valid') : 'idle',
       error: error ?? undefined,
     });
@@ -297,6 +310,7 @@ export function App() {
         docId: null,
         unsaved: true,
         source: null,
+        origin: { kind: 'file', fileName: file.name },
         format: settingsRef.current.autoFormat,
       });
     } catch (e) {
@@ -304,14 +318,52 @@ export function App() {
     }
   };
 
-  const saveSide = async (side: Side) => {
+  /** Where the pane's content came from, remembered with a saved copy. */
+  const savedFromFor = (side: Side): SavedFrom | null => {
+    const s = sidesRef.current[side];
+    if (s.source) {
+      const conn = connectionsRef.current.find((c) => c.id === s.source!.connId);
+      if (!conn) return null;
+      return { connId: conn.id, connName: conn.name, env: conn.env, key: s.source.key, fetchedAt: s.source.fetchedAt };
+    }
+    return s.origin?.kind === 'library' ? s.origin.from : null;
+  };
+
+  /** Opens the "Save to library" dialog with a ready-made name. */
+  const requestSave = (side: Side) => {
+    const s = sidesRef.current[side];
+    if (s.size === 0) {
+      showToast('Nothing to save: this pane is empty', 'error');
+      return;
+    }
+    let defaultName = s.name.trim() || 'Untitled.json';
+    // A new snapshot of a Redis key gets the key, environment and time so copies are easy to tell apart.
+    if (!s.docId && s.source) {
+      const env = savedFromFor(side)?.env;
+      defaultName = `${s.source.key} (${env ? ENV_LABEL[env] : 'redis'}, ${stamp()})`;
+    }
+    setSaveDialog({ side, defaultName });
+  };
+
+  const saveSide = async (side: Side, name: string, asCopy: boolean) => {
     const h = handles.current[side];
     if (!h) return;
     const s = sidesRef.current[side];
-    const name = s.name.trim() || 'Untitled.json';
+    const from = savedFromFor(side);
     try {
-      const meta = await storage.saveDoc(name, h.model.getValue(), s.docId);
-      patchSide(side, { docId: meta.id, name, unsaved: false });
+      const meta = await storage.saveDoc(name, h.model.getValue(), asCopy ? null : s.docId, from);
+      if (s.source) {
+        // A live Redis pane stays live and keeps showing its key. Each save is a separate snapshot
+        // (so it is not linked to the pane, and saving again makes another one).
+        patchSide(side, { unsaved: false });
+      } else {
+        patchSide(side, {
+          docId: meta.id,
+          name,
+          unsaved: false,
+          origin: { kind: 'library', savedAt: meta.updatedAt, from },
+        });
+      }
       autosaveDirty.current[side] = true;
       await flushAutosave(side);
       showToast(`Saved “${name}” to the library`);
@@ -337,15 +389,23 @@ export function App() {
   const clearSide = (side: Side) => {
     const s = sidesRef.current[side];
     if (s.unsaved && s.size > 0 && !confirm('Clear this pane? Changes not saved to the library will be lost.')) return;
-    void loadText(side, '', { name: side === 'left' ? 'Original.json' : 'Modified.json', docId: null, unsaved: false, source: null });
+    void loadText(side, '', { name: side === 'left' ? 'Original.json' : 'Modified.json', docId: null, unsaved: false, source: null, origin: null });
   };
 
   const loadFromLibrary = async (side: Side, doc: DocMeta) => {
     setShowLibrary(false);
+    if (side === 'right' && !settingsRef.current.rightOpen) updateSettings({ rightOpen: true });
     try {
       const text = await storage.getDocText(doc.id);
       if (text === undefined) throw new Error('document content is missing');
-      await loadText(side, text, { name: doc.name, docId: doc.id, unsaved: false, source: null, format: false });
+      await loadText(side, text, {
+        name: doc.name,
+        docId: doc.id,
+        unsaved: false,
+        source: null,
+        origin: { kind: 'library', savedAt: doc.updatedAt, from: doc.from ?? null },
+        format: false,
+      });
     } catch (e) {
       showToast(`Could not open “${doc.name}”: ${e instanceof Error ? e.message : e}`, 'error');
     }
@@ -368,11 +428,11 @@ export function App() {
   }, [showToast]);
 
   /** Fetches a key into a pane (always pretty-printed; Redis values are usually minified). */
-  const fetchKey = async (side: Side, connId: string, key: string) => {
+  const fetchKey = async (side: Side, connId: string, key: string): Promise<boolean> => {
     const conn = connectionsRef.current.find((c) => c.id === connId);
-    if (!conn) return;
+    if (!conn) return false;
     const prev = sidesRef.current[side];
-    if (prev.unsaved && prev.size > 0 && !confirm('This pane has changes that are not saved to the library. Replace them?')) return;
+    if (prev.unsaved && prev.size > 0 && !confirm('This pane has changes that are not saved to the library. Replace them?')) return false;
     patchSide(side, { status: 'busy', busyLabel: `Fetching from ${conn.name}…` });
     try {
       const { text, meta } = await redisApi.fetchValue(connId, key);
@@ -383,10 +443,13 @@ export function App() {
         unsaved: false,
         format: true,
         source: { connId, key, fetchedAt: Date.now(), meta },
+        origin: null,
       });
+      return true;
     } catch (e) {
       patchSide(side, { status: prev.status, busyLabel: undefined, error: prev.error });
       showToast(`Could not fetch “${key}” from ${conn.name}: ${e instanceof Error ? e.message : e}`, 'error');
+      return false;
     }
   };
 
@@ -396,9 +459,21 @@ export function App() {
   };
 
   /** Loads the same key from another connection into the opposite pane. */
-  const compareWith = (side: Side, connId: string) => {
+  const compareWith = async (side: Side, connId: string) => {
     const src = sidesRef.current[side].source;
-    if (src) void fetchKey(side === 'left' ? 'right' : 'left', connId, src.key);
+    if (!src) return;
+    const other: Side = side === 'left' ? 'right' : 'left';
+    if (!settingsRef.current.rightOpen) updateSettings({ rightOpen: true });
+    // Asking to compare is an explicit request, so switch comparing on once the other value is in.
+    if (await fetchKey(other, connId, src.key)) updateSettings({ compare: true });
+  };
+
+  // ---------- second pane ----------
+
+  const closeRight = () => {
+    if (lastFocused.current === 'right') lastFocused.current = 'left';
+    // Nothing to compare against any more.
+    updateSettings({ rightOpen: false, compare: false });
   };
 
   const goToError = (side: Side) => {
@@ -476,7 +551,7 @@ export function App() {
           const saved = await storage.loadWorkspace(side);
           if (saved) {
             restored = true;
-            await loadText(side, saved.text, { name: saved.name, docId: saved.docId, unsaved: saved.unsaved, source: saved.source ?? null, format: false });
+            await loadText(side, saved.text, { name: saved.name, docId: saved.docId, unsaved: saved.unsaved, source: saved.source ?? null, origin: saved.origin ?? null, format: false });
           }
         }
       } catch (e) {
@@ -545,7 +620,7 @@ export function App() {
         stepRef.current(e.shiftKey ? -1 : 1);
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        void saveSide(lastFocused.current);
+        requestSave(settingsRef.current.rightOpen ? lastFocused.current : 'left');
       }
     };
     window.addEventListener('keydown', onKey);
@@ -558,10 +633,15 @@ export function App() {
   const envClassFor = (side: Side): string | undefined => {
     const src = sides[side].source;
     const env = src && redis.connections.find((c) => c.id === src.connId)?.env;
-    return env ? `env-${env}` : undefined;
+    if (env) return `env-${env}`;
+    // Not live Redis data: a dashed violet / grey bar instead of a solid environment colour.
+    const origin = sides[side].origin;
+    return origin ? `origin-${origin.kind}` : undefined;
   };
 
-  const { compare, fontSize, sortKeys, autoFormat, theme } = settings;
+  const { fontSize, sortKeys, autoFormat, theme, rightOpen } = settings;
+  const compare = settings.compare && rightOpen;
+  const visibleSides = rightOpen ? SIDES : (['left'] as Side[]);
   const counter = !compare
     ? 'Compare is off'
     : comparing && !stats
@@ -585,32 +665,40 @@ export function App() {
           <span className="logo">{'{}'}</span> JSON Compare
         </div>
 
-        <label className="switch" title="Turn the comparison on or off">
-          <input type="checkbox" checked={compare} onChange={(e) => updateSettings({ compare: e.target.checked })} />
-          <span className="track" />
-          <span>Compare</span>
-        </label>
+        {rightOpen ? (
+          <>
+            <label className="switch" title="Turn the comparison on or off">
+              <input type="checkbox" checked={compare} onChange={(e) => updateSettings({ compare: e.target.checked })} />
+              <span className="track" />
+              <span>Compare</span>
+            </label>
 
-        <div className="group">
-          <button disabled={!compare || nav.total === 0} onClick={() => step(-1)} title="Previous difference (Shift+F7)">
-            ▲ Prev
-          </button>
-          <span className={`counter${comparing ? ' busy' : ''}`} aria-live="polite">
-            {counter}
-          </span>
-          <button disabled={!compare || nav.total === 0} onClick={() => step(1)} title="Next difference (F7)">
-            ▼ Next
-          </button>
-        </div>
+            <div className="group">
+              <button disabled={!compare || nav.total === 0} onClick={() => step(-1)} title="Previous difference (Shift+F7)">
+                ▲ Prev
+              </button>
+              <span className={`counter${comparing ? ' busy' : ''}`} aria-live="polite">
+                {counter}
+              </span>
+              <button disabled={!compare || nav.total === 0} onClick={() => step(1)} title="Next difference (F7)">
+                ▼ Next
+              </button>
+            </div>
 
-        {compare && stats && (
-          <span className="stats" title={stats.approximate ? 'Files are very different; the diff may not be minimal' : undefined}>
-            <span className="del">−{stats.removed.toLocaleString()}</span>
-            <span className="add">+{stats.added.toLocaleString()}</span>
-            <span className="muted">lines · {stats.ms} ms</span>
-            {stats.approximate && <span className="warn">approx.</span>}
-            {stats.alignmentSkipped && <span className="warn" title="Too many differences to line up the panes">unaligned</span>}
-          </span>
+            {compare && stats && (
+              <span className="stats" title={stats.approximate ? 'Files are very different; the diff may not be minimal' : undefined}>
+                <span className="del">−{stats.removed.toLocaleString()}</span>
+                <span className="add">+{stats.added.toLocaleString()}</span>
+                <span className="muted">lines · {stats.ms} ms</span>
+                {stats.approximate && <span className="warn">approx.</span>}
+                {stats.alignmentSkipped && <span className="warn" title="Too many differences to line up the panes">unaligned</span>}
+              </span>
+            )}
+          </>
+        ) : (
+          <button onClick={() => updateSettings({ rightOpen: true })} title="Show a second pane to compare two JSON documents">
+            ＋ Second pane
+          </button>
         )}
 
         <div className="spacer" />
@@ -623,8 +711,8 @@ export function App() {
           <input type="checkbox" checked={autoFormat} onChange={(e) => updateSettings({ autoFormat: e.target.checked })} />
           Auto-format
         </label>
-        <button onClick={() => SIDES.forEach((s) => void formatSide(s))} title="Pretty-print both panes">
-          Format both
+        <button onClick={() => visibleSides.forEach((s) => void formatSide(s))} title={rightOpen ? 'Pretty-print both panes' : 'Pretty-print the document'}>
+          {rightOpen ? 'Format both' : 'Format'}
         </button>
 
         <div className="group font" title="Editor font size (also Ctrl + mouse wheel)">
@@ -652,12 +740,12 @@ export function App() {
         </button>
       </header>
 
-      <main className="panes">
+      <main className={`panes${rightOpen ? '' : ' single'}`}>
         {SIDES.map((side) => (
           <EditorPane
             key={side}
             side={side}
-            label={side === 'left' ? 'Original' : 'Modified'}
+            label={side === 'right' ? 'Modified' : rightOpen ? 'Original' : 'Document'}
             state={sides[side]}
             fontSize={fontSize}
             envClass={envClassFor(side)}
@@ -670,12 +758,23 @@ export function App() {
                   busy={sides[side].status === 'busy'}
                   onLoad={(connId, key) => void fetchKey(side, connId, key)}
                   onRefresh={() => refreshSide(side)}
-                  onCompareWith={(connId) => compareWith(side, connId)}
+                  onCompareWith={(connId) => void compareWith(side, connId)}
                   onManage={() => setShowConnections(true)}
                   onConnChange={(id) => updateSettings({ lastConnId: id })}
                 />
               ) : undefined
             }
+            banner={
+              sides[side].origin && !sides[side].source ? (
+                <OriginBanner
+                  origin={sides[side].origin!}
+                  edited={sides[side].unsaved}
+                  connections={redis.connections}
+                  onLoadLive={(connId, key) => void fetchKey(side, connId, key)}
+                />
+              ) : undefined
+            }
+            onClose={side === 'right' ? closeRight : undefined}
             onReady={onReady(side)}
             onNameChange={(name) => {
               patchSide(side, { name });
@@ -683,7 +782,7 @@ export function App() {
             }}
             onOpenFile={(f) => void openFile(side, f)}
             onFormat={() => void formatSide(side)}
-            onSave={() => void saveSide(side)}
+            onSave={() => requestSave(side)}
             onDownload={() => downloadSide(side)}
             onClear={() => clearSide(side)}
             onZoom={zoom}
@@ -692,6 +791,19 @@ export function App() {
         ))}
       </main>
 
+      {saveDialog && (
+        <SaveDialog
+          defaultName={saveDialog.defaultName}
+          existing={!!sides[saveDialog.side].docId}
+          from={savedFromFor(saveDialog.side)}
+          onCancel={() => setSaveDialog(null)}
+          onSave={(name, asCopy) => {
+            const side = saveDialog.side;
+            setSaveDialog(null);
+            void saveSide(side, name, asCopy);
+          }}
+        />
+      )}
       {showConnections && (
         <Connections connections={redis.connections} onChanged={() => void reloadConnections()} onClose={() => setShowConnections(false)} />
       )}

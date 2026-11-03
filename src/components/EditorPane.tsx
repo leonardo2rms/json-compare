@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { JSON_LANG, monaco } from '../lib/monaco';
 import type { JsonError } from '../lib/protocol';
 import type { SourceInfo } from '../lib/redisTypes';
+import type { PaneOrigin } from '../lib/storage';
 import { formatBytes } from '../lib/format';
 
 export type Side = 'left' | 'right';
@@ -17,6 +18,8 @@ export interface SideState {
   error?: JsonError;
   /** Redis origin of the content, if it was fetched from Redis. */
   source: SourceInfo | null;
+  /** Set when the content is a library copy or a file (i.e. not live Redis data). */
+  origin: PaneOrigin | null;
 }
 
 export interface EditorHandle {
@@ -31,7 +34,11 @@ interface Props {
   fontSize: number;
   /** Optional row rendered under the header (Redis key picker). */
   sourceBar?: ReactNode;
-  /** Colour-codes the pane by environment (e.g. env-prod). */
+  /** Shown under the key picker, e.g. "saved copy – not live data". */
+  banner?: ReactNode;
+  /** When set, a close button is shown that hides this pane. */
+  onClose?: () => void;
+  /** Colour-codes the pane by environment (e.g. env-prd). */
   envClass?: string;
   onReady: (handle: EditorHandle) => void;
   onNameChange: (name: string) => void;
@@ -168,6 +175,11 @@ export function EditorPane(p: Props) {
         <button onClick={p.onClear} title="Clear this pane">
           Clear
         </button>
+        {p.onClose && (
+          <button className="close-pane" onClick={p.onClose} title="Close this pane – the other one takes the whole screen" aria-label="Close this pane">
+            ✕
+          </button>
+        )}
         <input
           ref={fileRef}
           type="file"
@@ -181,6 +193,7 @@ export function EditorPane(p: Props) {
         />
       </div>
       {p.sourceBar}
+      {p.banner}
       <div className="editor-wrap">
         <div ref={hostRef} className="editor" />
         {empty && state.status !== 'busy' && (

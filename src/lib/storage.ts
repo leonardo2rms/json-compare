@@ -7,13 +7,23 @@
  *   workspace – autosaved state of the two editor panes ('left' / 'right')
  */
 
-import type { SourceInfo } from './redisTypes';
+import type { SavedFrom, SourceInfo } from './redisTypes';
+
+/**
+ * What a pane's content is, when it is not live Redis data (that is `SourceInfo`):
+ * a copy opened from the library, or a file opened from disk.
+ */
+export type PaneOrigin =
+  | { kind: 'library'; savedAt: number; from: SavedFrom | null }
+  | { kind: 'file'; fileName: string };
 
 export interface DocMeta {
   id: string;
   name: string;
   size: number;
   updatedAt: number;
+  /** Set when the document was saved from a Redis key. */
+  from?: SavedFrom | null;
 }
 
 export interface WorkspaceSide {
@@ -25,6 +35,8 @@ export interface WorkspaceSide {
   unsaved: boolean;
   /** Redis key this pane was loaded from (so it can be refreshed after a reload). */
   source?: SourceInfo | null;
+  /** Library / file origin (see PaneOrigin). */
+  origin?: PaneOrigin | null;
 }
 
 const DB_NAME = 'json-compare';
@@ -83,12 +95,13 @@ export const storage = {
   },
 
   /** Creates (no id) or overwrites a saved document. Returns its metadata. */
-  async saveDoc(name: string, text: string, id?: string | null): Promise<DocMeta> {
+  async saveDoc(name: string, text: string, id?: string | null, from?: SavedFrom | null): Promise<DocMeta> {
     const meta: DocMeta = {
       id: id ?? crypto.randomUUID(),
       name,
       size: text.length,
       updatedAt: Date.now(),
+      from: from ?? null,
     };
     await tx(['docs', 'content'], 'readwrite', (t) => {
       t.objectStore('docs').put(meta, meta.id);
@@ -112,6 +125,8 @@ export interface Settings {
   compare: boolean;
   sortKeys: boolean;
   autoFormat: boolean;
+  /** Whether the second (right) pane is shown. */
+  rightOpen: boolean;
   theme: 'light' | 'dark';
   /** Last Redis connection picked in a key search. */
   lastConnId?: string;
@@ -119,16 +134,18 @@ export interface Settings {
 
 export const defaultSettings = (): Settings => ({
   fontSize: 13,
-  compare: true,
+  compare: false,
   sortKeys: false,
   autoFormat: true,
+  rightOpen: true,
   theme: window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
 });
 
 export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) return { ...defaultSettings(), ...JSON.parse(raw) };
+    // Comparing always starts switched off; it is turned on explicitly (toggle or "Compare with…").
+    if (raw) return { ...defaultSettings(), ...JSON.parse(raw), compare: false };
   } catch {
     /* storage unavailable – fall through to defaults */
   }

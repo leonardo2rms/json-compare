@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { storage, type DocMeta } from '../lib/storage';
-import { formatBytes } from '../lib/format';
+import { formatBytes, formatClock } from '../lib/format';
+import { ENV_LABEL } from '../lib/redisApi';
 import type { Side } from './EditorPane';
 
 interface Props {
@@ -50,6 +51,7 @@ export function Library({ onClose, onLoad, onError }: Props) {
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Taken from</th>
                 <th>Size</th>
                 <th>Saved</th>
                 <th />
@@ -59,6 +61,18 @@ export function Library({ onClose, onLoad, onError }: Props) {
               {docs.map((d) => (
                 <tr key={d.id}>
                   <td className="doc-name">{d.name}</td>
+                  <td className="small">
+                    {d.from ? (
+                      <>
+                        <span className={`env-chip env-${d.from.env}`}>{ENV_LABEL[d.from.env]}</span> {d.from.connName}
+                        <div className="muted">
+                          <code>{d.from.key}</code> · {formatClock(d.from.fetchedAt)}
+                        </div>
+                      </>
+                    ) : (
+                      <span className="muted">file / pasted</span>
+                    )}
+                  </td>
                   <td>{formatBytes(d.size)}</td>
                   <td>{new Date(d.updatedAt).toLocaleString()}</td>
                   <td className="actions">

@@ -1,7 +1,17 @@
 /** Types shared by the local API server (server/) and the web app. */
 
-export const ENVS = ['local', 'dev', 'staging', 'prod'] as const;
+export const ENVS = ['local', 'tst', 'acc', 'prd'] as const;
 export type Env = (typeof ENVS)[number];
+
+/** Names used by earlier versions, still found in saved connection files. */
+const LEGACY_ENVS: Record<string, Env> = { dev: 'tst', test: 'tst', staging: 'acc', stg: 'acc', prod: 'prd' };
+
+/** Maps any stored environment name (including legacy ones) to a current one. */
+export function normalizeEnv(value: unknown): Env {
+  const v = String(value ?? '').toLowerCase();
+  if ((ENVS as readonly string[]).includes(v)) return v as Env;
+  return LEGACY_ENVS[v] ?? 'tst';
+}
 
 /**
  * How we authenticate. Only plain username/password for now; the server resolves
@@ -97,4 +107,13 @@ export interface SourceInfo {
   key: string;
   fetchedAt: number;
   meta: KeyMeta;
+}
+
+/** Where a library copy was originally fetched from, so a saved snapshot still says so. */
+export interface SavedFrom {
+  connId: string;
+  connName: string;
+  env: Env;
+  key: string;
+  fetchedAt: number;
 }
