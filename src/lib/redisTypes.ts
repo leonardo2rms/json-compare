@@ -1,5 +1,12 @@
 /** Types shared by the local API server (server/) and the web app. */
 
+/**
+ * Bump when the local server's API changes in a way the web app depends on.
+ * The app compares it with /api/health so a stale server process is noticed
+ * instead of silently misbehaving.
+ */
+export const API_VERSION = 2;
+
 export const ENVS = ['local', 'tst', 'acc', 'prd'] as const;
 export type Env = (typeof ENVS)[number];
 

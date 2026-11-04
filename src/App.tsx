@@ -10,8 +10,8 @@ import { monaco } from './lib/monaco';
 import { diffInWorker, formatInWorker, resetDiffWorker, validateInWorker } from './lib/workers';
 import { loadSettings, saveSettings, storage, type DocMeta, type PaneOrigin, type Settings } from './lib/storage';
 import type { JsonError } from './lib/protocol';
-import { ENV_LABEL, isApiAvailable, redisApi } from './lib/redisApi';
-import type { ConnectionInfo, SavedFrom, SourceInfo } from './lib/redisTypes';
+import { ENV_LABEL, checkApi, redisApi } from './lib/redisApi';
+import { API_VERSION, type ConnectionInfo, type SavedFrom, type SourceInfo } from './lib/redisTypes';
 import { SAMPLE_LEFT, SAMPLE_RIGHT } from './sample';
 
 const SIDES: Side[] = ['left', 'right'];
@@ -77,7 +77,7 @@ export function App() {
   const [showLibrary, setShowLibrary] = useState(false);
   const [showConnections, setShowConnections] = useState(false);
   const [saveDialog, setSaveDialog] = useState<{ side: Side; defaultName: string } | null>(null);
-  const [redis, setRedis] = useState<{ available: boolean; connections: ConnectionInfo[] }>({ available: false, connections: [] });
+  const [redis, setRedis] = useState<{ available: boolean; outdated: boolean; connections: ConnectionInfo[] }>({ available: false, outdated: false, connections: [] });
   const connectionsRef = useRef<ConnectionInfo[]>([]);
   connectionsRef.current = redis.connections;
   const [toast, setToast] = useState<{ msg: string; kind: 'info' | 'error' } | null>(null);
@@ -414,15 +414,17 @@ export function App() {
   // ---------- Redis ----------
 
   const reloadConnections = useCallback(async () => {
-    const available = await isApiAvailable();
-    if (!available) {
-      setRedis({ available: false, connections: [] });
+    const api = await checkApi();
+    if (!api.available) {
+      setRedis({ available: false, outdated: false, connections: [] });
       return;
     }
+    // A server process started before an update keeps running the old code.
+    const outdated = api.version !== API_VERSION;
     try {
-      setRedis({ available: true, connections: await redisApi.listConnections() });
+      setRedis({ available: true, outdated, connections: await redisApi.listConnections() });
     } catch (e) {
-      setRedis({ available: true, connections: [] });
+      setRedis({ available: true, outdated, connections: [] });
       showToast(`Could not load Redis connections: ${e instanceof Error ? e.message : e}`, 'error');
     }
   }, [showToast]);
@@ -739,6 +741,13 @@ export function App() {
           {theme === 'dark' ? '☀' : '☾'}
         </button>
       </header>
+
+      {redis.outdated && (
+        <div className="warn-bar" role="alert">
+          <b>The local server is out of date.</b> It was started before the last update and is still running the old code. Stop it
+          (Ctrl+C in its terminal) and start it again with <code>npm run dev</code> or <code>npm start</code>, then reload this page.
+        </div>
+      )}
 
       <main className={`panes${rightOpen ? '' : ' single'}`}>
         {SIDES.map((side) => (

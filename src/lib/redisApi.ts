@@ -1,11 +1,13 @@
-import type {
-  BrowseResult,
+import { normalizeEnv, type BrowseResult,
   ConnectionInfo,
   ConnectionInput,
   KeyMeta,
   KeySearchResult,
   TestResult,
 } from './redisTypes';
+
+/** Environment names from an older server (dev/staging/prod) are translated here too. */
+const withEnv = (c: ConnectionInfo): ConnectionInfo => ({ ...c, env: normalizeEnv(c.env) });
 
 // Same-origin: the local API server serves the app in production and Vite proxies /api in dev.
 const MUTATION_HEADERS = { 'content-type': 'application/json', 'x-requested-with': 'json-compare' };
@@ -35,27 +37,32 @@ async function json<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-/** True when the local API server is reachable (otherwise the app runs as a plain static page). */
-export async function isApiAvailable(): Promise<boolean> {
+/** Is the local API server reachable, and which API version does it speak? */
+export async function checkApi(): Promise<{ available: boolean; version?: number }> {
   try {
     const res = await fetch('/api/health', { headers: { accept: 'application/json' } });
-    if (!res.ok) return false;
-    const body = (await res.json()) as { ok?: boolean };
-    return body.ok === true;
+    if (!res.ok) return { available: false };
+    const body = (await res.json()) as { ok?: boolean; apiVersion?: number };
+    return body.ok === true ? { available: true, version: body.apiVersion } : { available: false };
   } catch {
-    return false;
+    return { available: false };
   }
 }
 
 export const redisApi = {
-  listConnections: () => fetch('/api/connections').then(json<ConnectionInfo[]>),
+  listConnections: () =>
+    fetch('/api/connections')
+      .then(json<ConnectionInfo[]>)
+      .then((list) => list.map(withEnv)),
 
   saveConnection: (input: ConnectionInput) =>
     fetch(input.id ? `/api/connections/${input.id}` : '/api/connections', {
       method: input.id ? 'PUT' : 'POST',
       headers: MUTATION_HEADERS,
       body: JSON.stringify(input),
-    }).then(json<ConnectionInfo>),
+    })
+      .then(json<ConnectionInfo>)
+      .then(withEnv),
 
   deleteConnection: (id: string) =>
     fetch(`/api/connections/${id}`, { method: 'DELETE', headers: MUTATION_HEADERS }).then(json<{ ok: true }>),

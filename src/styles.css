@@ -475,9 +475,9 @@ button.danger {
   padding: 1px 6px;
   border-radius: 8px;
   color: #fff;
-  background: var(--env-tst);
+  background: var(--env-local);
 }
-.env-chip.env-local { background: var(--env-local); }
+.env-chip.env-tst { background: var(--env-tst); }
 .env-chip.env-acc { background: var(--env-acc); }
 .env-chip.env-prd { background: var(--env-prd); }
 /* A bar along the top of a pane fed from Redis, coloured by environment (prod = red). */
@@ -489,10 +489,10 @@ button.danger {
   right: 0;
   height: 3px;
   z-index: 5;
-  background: var(--env-tst);
+  background: var(--env-local);
   pointer-events: none;
 }
-.pane.env-local::before { background: var(--env-local); }
+.pane.env-tst::before { background: var(--env-tst); }
 .pane.env-acc::before { background: var(--env-acc); }
 .pane.env-prd::before { background: var(--env-prd); }
 
@@ -528,10 +528,10 @@ button.danger {
   max-width: 220px;
 }
 .conn-select {
-  border-left: 4px solid var(--env-tst);
+  border-left: 4px solid var(--env-local);
   font-weight: 500;
 }
-.conn-select.env-local { border-left-color: var(--env-local); }
+.conn-select.env-tst { border-left-color: var(--env-tst); }
 .conn-select.env-acc { border-left-color: var(--env-acc); }
 .conn-select.env-prd { border-left-color: var(--env-prd); }
 .key-box {
@@ -792,4 +792,23 @@ button.primary:hover:not(:disabled) {
 .panes.single .pane-tag.left {
   color: var(--muted);
   background: var(--btn);
+}
+
+/* ---- stale server warning ---- */
+.warn-bar {
+  padding: 8px 14px;
+  background: #fff4d6;
+  color: #5c3d00;
+  border-bottom: 1px solid #e3b341;
+  font-size: 13px;
+}
+:root[data-theme='dark'] .warn-bar {
+  background: #3b2e0a;
+  color: #f0d58a;
+  border-bottom-color: #9e6a03;
+}
+.warn-bar code {
+  background: rgba(0, 0, 0, 0.12);
+  padding: 1px 5px;
+  border-radius: 4px;
 }

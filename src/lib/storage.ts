@@ -7,7 +7,7 @@
  *   workspace – autosaved state of the two editor panes ('left' / 'right')
  */
 
-import type { SavedFrom, SourceInfo } from './redisTypes';
+import { normalizeEnv, type SavedFrom, type SourceInfo } from './redisTypes';
 
 /**
  * What a pane's content is, when it is not live Redis data (that is `SourceInfo`):
@@ -87,7 +87,9 @@ export const storage = {
 
   async listDocs(): Promise<DocMeta[]> {
     const all = (await tx<DocMeta[]>(['docs'], 'readonly', (t) => t.objectStore('docs').getAll())) ?? [];
-    return all.sort((a, b) => b.updatedAt - a.updatedAt);
+    return all
+      .map((d) => (d.from ? { ...d, from: { ...d.from, env: normalizeEnv(d.from.env) } } : d))
+      .sort((a, b) => b.updatedAt - a.updatedAt);
   },
 
   async getDocText(id: string): Promise<string | undefined> {

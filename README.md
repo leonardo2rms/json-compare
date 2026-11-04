@@ -120,6 +120,10 @@ npm run bench      # engine benchmark on a generated ~20 MB document
 
 Without the server (e.g. `npm run dev:web` or any static hosting) everything except Redis works.
 
+**After pulling an update, restart the server** (stop `npm run dev` / `npm start` with Ctrl+C and start it again). The
+web app and the local server are separate processes; if the server is still running old code the app shows a yellow
+"local server is out of date" bar instead of silently misbehaving.
+
 Tips:
 
 - Paste over a whole pane, or open a file, and minified JSON is pretty-printed automatically

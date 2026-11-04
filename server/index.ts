@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
-import type { ConnectionInput } from '../src/lib/redisTypes';
+import { API_VERSION, type ConnectionInput } from '../src/lib/redisTypes';
 import { configFile, loadConnections, removeConnection, toInfo, upsertConnection, ValidationError } from './config';
 import {
   browseKeys,
@@ -57,7 +57,7 @@ async function requireConnection(id: string) {
 }
 
 // --- API ------------------------------------------------------------------
-app.get('/api/health', async () => ({ ok: true, readOnly: true }));
+app.get('/api/health', async () => ({ ok: true, readOnly: true, apiVersion: API_VERSION }));
 
 app.get('/api/connections', async () => (await loadConnections()).map(toInfo));
 
