@@ -1,9 +1,9 @@
-import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { API_VERSION, type ConnectionInput } from '../src/lib/redisTypes';
+import { distStatus } from './buildInfo';
 import { configFile, loadConnections, removeConnection, toInfo, upsertConnection, ValidationError } from './config';
 import {
   browseKeys,
@@ -130,23 +130,63 @@ app.get<{ Params: { id: string }; Querystring: { key?: string } }>('/api/connect
     .send(body);
 });
 
-// --- Static app (production) ----------------------------------------------
-if (existsSync(join(dist, 'index.html'))) {
-  await app.register(fastifyStatic, { root: dist });
+// --- Static app ------------------------------------------------------------
+// The API server can also serve the built web app (npm start). It refuses to
+// serve a build that no longer matches the sources: an old web app talking to
+// this (newer) server is confusing – e.g. it still offers the old environment names.
+const apiOnly = process.argv.includes('--api-only'); // used by `npm run dev`: Vite serves the app instead
+const status = apiOnly ? 'missing' : distStatus(root);
+
+const noticePage = (title: string, body: string) => `<!doctype html><meta charset="utf-8"><title>JSON Compare</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:640px;margin:12vh auto;padding:0 20px;color:#1f2328}
+code{background:#eef0f3;padding:2px 6px;border-radius:5px}h1{font-size:20px}</style>
+<h1>${title}</h1>${body}`;
+
+let appUrl = '';
+if (status === 'ok') {
+  await app.register(fastifyStatic, {
+    root: dist,
+    cacheControl: false,
+    setHeaders: (res, path) => {
+      // index.html must always be re-checked so a new build is picked up; hashed assets can be cached forever.
+      res.header('cache-control', path.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable');
+    },
+  });
   app.setNotFoundHandler((req, reply) => {
     if (req.method === 'GET' && !req.url.startsWith('/api/')) return reply.sendFile('index.html');
     return reply.code(404).send({ error: 'Not found' });
   });
+  appUrl = `http://${HOST}:${PORT}`;
 } else {
-  app.log.warn('dist/ not found – run `npm run build` to serve the app from this server (the Vite dev server works without it)');
+  const stale = status === 'stale';
+  const html = apiOnly
+    ? noticePage(
+        'This is the API server',
+        '<p>The web app is served by Vite while you run <code>npm run dev</code>. Open the address that Vite printed in the terminal (usually <code>http://localhost:5173</code>).</p>',
+      )
+    : stale
+      ? noticePage(
+          'The built web app is out of date',
+          '<p>The code changed since <code>dist/</code> was last built, so serving it would show an old version of the app.</p><p>Stop this server and run <code>npm start</code> (it rebuilds first), or <code>npm run build</code> and then start it again.</p>',
+        )
+      : noticePage(
+          'The web app has not been built yet',
+          '<p>Run <code>npm start</code> (it builds first), or use <code>npm run dev</code> for development.</p>',
+        );
+  app.setNotFoundHandler((req, reply) => {
+    if (req.method === 'GET' && !req.url.startsWith('/api/')) return reply.code(stale ? 503 : 200).type('text/html; charset=utf-8').send(html);
+    return reply.code(404).send({ error: 'Not found' });
+  });
+  if (stale) console.warn('\n  !! dist/ is OUT OF DATE (the sources changed after the last build). The app is NOT being served.\n  !! Run `npm start` (rebuilds first) or `npm run build`.\n');
 }
 
 try {
   await app.listen({ host: HOST, port: PORT });
-  console.log(`\n  JSON Compare API  http://${HOST}:${PORT}${existsSync(join(dist, 'index.html')) ? '  (app + API)' : '  (API only – run Vite for the UI)'}`);
+  console.log(`\n  JSON Compare API  http://${HOST}:${PORT}${appUrl ? '  (app + API)' : '  (API only)'}`);
+  if (apiOnly) console.log('  Open the app at the address Vite prints (usually http://localhost:5173)');
   console.log(`  Connections file  ${configFile}\n  Redis access is read-only.\n`);
 } catch (e) {
-  if ((e as NodeJS.ErrnoException).code === 'EADDRINUSE') console.error(`Port ${PORT} is already in use. Set PORT=<number> to use another one.`);
+  if ((e as NodeJS.ErrnoException).code === 'EADDRINUSE') console.error(`Port ${PORT} is already in use (is another copy still running?). Stop it, or set PORT=<number>.`);
   else console.error(e);
   process.exit(1);
 }

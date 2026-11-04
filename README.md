@@ -110,8 +110,8 @@ the one unavoidable pause is Monaco ingesting the formatted text (≈ 1–2 s fo
 
 ```bash
 npm install
-npm run dev        # Vite dev server + local API server (needed for Redis)
-npm start          # production build, served together with the API on http://127.0.0.1:8787
+npm run dev        # development: open the address Vite prints (http://localhost:5173); API runs alongside on :8787
+npm start          # builds first, then serves app + API together on http://127.0.0.1:8787
 npm run dev:web    # UI only (no Redis)
 npm run build      # type-check + production build into dist/
 npm test           # unit tests (parser, formatter, diff, server config)
@@ -119,6 +119,10 @@ npm run bench      # engine benchmark on a generated ~20 MB document
 ```
 
 Without the server (e.g. `npm run dev:web` or any static hosting) everything except Redis works.
+
+Use **one** of the two: `npm run dev` (open :5173) *or* `npm start` (open :8787). In dev mode :8787 is API-only; the server
+also refuses to serve a `dist/` build that no longer matches the sources (it shows "The built web app is out of date" with
+the command to run) so you can never end up looking at an old version of the app.
 
 **After pulling an update, restart the server** (stop `npm run dev` / `npm start` with Ctrl+C and start it again). The
 web app and the local server are separate processes; if the server is still running old code the app shows a yellow

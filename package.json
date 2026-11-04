@@ -4,12 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k -n web,api -c blue,green \"vite\" \"tsx watch server/index.ts\"",
+    "dev": "concurrently -k -n web,api -c blue,green \"vite\" \"tsx watch server/index.ts --api-only\"",
     "dev:web": "vite",
-    "dev:api": "tsx watch server/index.ts",
+    "dev:api": "tsx watch server/index.ts --api-only",
     "build": "tsc --noEmit && vite build",
     "start": "npm run build && tsx server/index.ts",
-    "serve": "tsx server/index.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "bench": "vite-node scripts/bench.ts"
