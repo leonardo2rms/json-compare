@@ -72,6 +72,54 @@ All credential handling goes through `resolveAuth()` in `server/auth.ts`. To add
 an `auth.type` to `src/lib/redisTypes.ts`, handle it in `resolveAuth()` (it can be async, so it can
 fetch a token or a Key Vault secret before connecting) and add the fields to the connection form.
 
+## Desktop app (macOS)
+
+JSON Compare also ships as a normal Mac app (`JSON Compare.app`): double-click, no terminal, no `npm`.
+
+### Installing
+
+1. Open the repository's **Releases** page and download the right file for your Mac:
+   - Apple Silicon (M1/M2/M3/M4): `JSON-Compare-<version>-mac-arm64.dmg`
+   - Intel: `JSON-Compare-<version>-mac-x64.dmg`
+2. Open the `.dmg` and drag **JSON Compare** into **Applications**.
+3. **First launch only** – the app is not signed with an Apple Developer certificate, so macOS asks for
+   confirmation once:
+   - macOS 14 and older: right-click (or Control-click) the app → **Open** → **Open**.
+   - macOS 15 and newer: double-click the app, dismiss the warning, then **System Settings → Privacy &
+     Security**, scroll down and click **Open Anyway** next to "JSON Compare".
+   - Or, in Terminal: `xattr -dr com.apple.quarantine "/Applications/JSON Compare.app"`
+
+Requires macOS 13 or newer.
+
+### Where things are kept
+
+- Redis connections: `~/.json-compare/connections.json` – the same file the browser/dev version uses.
+- Library, autosaved panes and settings: inside the app's own storage
+  (`~/Library/Application Support/JSON Compare`). This is separate from your browser, so documents saved
+  there do not appear in the app (and vice versa).
+- The app runs the same local server as `npm start`, on `127.0.0.1:48787` (only reachable from your own
+  Mac). If that port is taken, set `JSON_COMPARE_DESKTOP_PORT`.
+- To update, download the new version and replace the app; your data stays.
+
+### Publishing a build (maintainers)
+
+Builds are made by GitHub Actions on a GitHub-hosted Mac (`.github/workflows/build-mac.yml`) – nothing
+needs to be built or uploaded from your own machine.
+
+1. On GitHub: **Releases → Draft a new release**, type a new tag such as `v0.2.0` (create it on publish),
+   and publish. (Or push a tag from the command line: `git tag v0.2.0 && git push origin v0.2.0`.)
+2. The **Build macOS app** workflow runs (a few minutes), runs the tests, builds both the Apple Silicon and
+   Intel apps and attaches the `.dmg` and `.zip` files to that release. The app's version is taken from the tag.
+3. To try a build without releasing: **Actions → Build macOS app → Run workflow**, then download the
+   `JSON-Compare-macOS` artifact from the finished run.
+
+On a Mac you can also build locally: `npm install && npm run package:mac` (output in `release/`), or run the
+desktop shell from the source with `npm run app`.
+
+Signing: the app is *ad-hoc* signed (required for Apple Silicon to run it), not notarized. Notarizing needs a
+paid Apple Developer account; with one, add the certificate and credentials as repository secrets and
+electron-builder will sign and notarize automatically.
+
 ## Tech stack
 
 | Concern      | Choice                                                                  |
@@ -83,6 +131,7 @@ fetch a token or a Key Vault secret before connecting) and add the fields to the
 | Diff / parse | Custom engine running in **Web Workers** (see below)                    |
 | Persistence  | IndexedDB (documents) + localStorage (small settings)                   |
 | Redis access | Small local Node server: Fastify + ioredis (read-only)                  |
+| Desktop app  | Electron + electron-builder; built on GitHub Actions                    |
 | Tests        | Vitest                                                                  |
 
 ## How it stays fast
@@ -112,6 +161,8 @@ the one unavoidable pause is Monaco ingesting the formatted text (≈ 1–2 s fo
 npm install
 npm run dev        # development: open the address Vite prints (http://localhost:5173); API runs alongside on :8787
 npm start          # builds first, then serves app + API together on http://127.0.0.1:8787
+npm run app        # the desktop (Electron) app, run from the source
+npm run package:mac # build the macOS .dmg/.zip into release/ (run on a Mac)
 npm run dev:web    # UI only (no Redis)
 npm run build      # type-check + production build into dist/
 npm test           # unit tests (parser, formatter, diff, server config)
@@ -150,9 +201,14 @@ src/
   lib/redisApi.ts         browser client for the local API
   workers/                tools.worker (format/validate), diff.worker
 server/
-  index.ts                local API (connections, key search, value fetch) + static app
+  index.ts                command-line entry (npm start / npm run dev)
+  app.ts                  startServer(): local API (connections, key search, value fetch) + static app
+  buildInfo.ts            detects an out-of-date dist/ build
   redis.ts                read-only Redis access (SCAN / GET / JSON.GET)
   config.ts, auth.ts      connection storage and credential resolution
+electron/main.ts          desktop shell (window + menu; runs the server in-process)
+build/                    app icon
+.github/workflows/        macOS build + release
 scripts/bench.ts          performance benchmark
 ```
 
@@ -161,4 +217,5 @@ scripts/bench.ts          performance benchmark
 - Entra ID / Key Vault authentication for Azure Cache for Redis.
 - jq-style query bar, "ignore fields" for diffs, and a path-based diff summary.
 - Snapshots of fetched keys (compare with "yesterday's" value) and pinned key pairs.
-- Desktop app (Tauri wrapper around this same web app, with the server bundled).
+- Notarized builds (needs an Apple Developer account) and in-app updates.
+- Windows / Linux builds of the desktop app.
