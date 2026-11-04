@@ -5,3 +5,4 @@ dist
 .vite
 electron-dist
 release
+.idea

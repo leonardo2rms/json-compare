@@ -91,6 +91,11 @@ JSON Compare also ships as a normal Mac app (`JSON Compare.app`): double-click, 
 
 Requires macOS 13 or newer.
 
+**About the downloads:** the app is not code-signed or notarized. The `.dmg`/`.zip` files on the Releases
+page are built automatically by GitHub Actions (`.github/workflows/build-mac.yml`) from the source in this
+repository, with no manual steps. If you prefer not to trust a prebuilt binary, build it yourself with
+`npm ci && npm run package:mac` (output in `release/`).
+
 ### Where things are kept
 
 - Redis connections: `~/.json-compare/connections.json` – the same file the browser/dev version uses.
@@ -219,3 +224,7 @@ scripts/bench.ts          performance benchmark
 - Snapshots of fetched keys (compare with "yesterday's" value) and pinned key pairs.
 - Notarized builds (needs an Apple Developer account) and in-app updates.
 - Windows / Linux builds of the desktop app.
+
+## License
+
+[MIT](LICENSE)
